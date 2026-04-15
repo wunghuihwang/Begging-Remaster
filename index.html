@@ -1364,6 +1364,7 @@
         let velocityY = 0;
         let velocityX = 0;
         let isTabArea = false;
+        let isHorizontal = null;
 
         inputLayer.addEventListener('touchstart', (e) => {
             const rect = canvas.getBoundingClientRect();
@@ -1378,8 +1379,7 @@
             velocityY = 0;
             velocityX = 0;
 
-            // 탭 영역인지 판단
-            isTabArea = y >= 580;
+            isHorizontal = null;
         });
 
         inputLayer.addEventListener('touchmove', (e) => {
@@ -1397,21 +1397,23 @@
             velocityY = deltaY;
             velocityX = deltaX;
 
-            // 탭 영역 → 가로 스크롤
-            if (isTabArea) {
+            if (isHorizontal === null) {
+                isHorizontal = Math.abs(deltaX) > Math.abs(deltaY);
+            }
+
+            // 가로 스크롤 (탭)
+            if (isHorizontal) {
                 gameState.tabScroll += deltaX;
 
                 const maxScroll = (70 * 9) - 360;
                 gameState.tabScroll = Math.max(0, Math.min(gameState.tabScroll, maxScroll));
             }
 
-            // 컨텐츠 영역 → 세로 스크롤
+            // 세로 스크롤 (컨텐츠)
             else if (Assets[gameState.currentTab] || gameState.currentTab === '스킬') {
                 gameState.scrollOffset += deltaY;
 
-                const totalHeight = 1000; // 임시
-                const maxScroll = totalHeight - 500;
-
+                const maxScroll = 1000; // 나중에 동적 계산 가능
                 gameState.scrollOffset = Math.max(0, Math.min(gameState.scrollOffset, maxScroll));
             }
 
@@ -1424,25 +1426,25 @@
         inputLayer.addEventListener('touchend', () => {
             isDragging = false;
 
-            // 관성 효과
             const friction = 0.95;
 
             function inertia() {
                 if (Math.abs(velocityY) < 0.1 && Math.abs(velocityX) < 0.1) return;
 
-                if (isTabArea) {
+                // 가로 관성
+                if (isHorizontal) {
                     gameState.tabScroll += velocityX;
 
                     const maxScroll = (70 * 9) - 360;
                     gameState.tabScroll = Math.max(0, Math.min(gameState.tabScroll, maxScroll));
 
                     velocityX *= friction;
-                } else {
+                }
+                // 세로 관성
+                else {
                     gameState.scrollOffset += velocityY;
 
-                    const totalHeight = 1000;
-                    const maxScroll = totalHeight - 500;
-
+                    const maxScroll = 1000;
                     gameState.scrollOffset = Math.max(0, Math.min(gameState.scrollOffset, maxScroll));
 
                     velocityY *= friction;
@@ -1453,7 +1455,6 @@
 
             inertia();
         });
-
         // ═══════════════════════════════════════════════════════════
         // 🎵 사운드 (간단한 피드백)
         // ═══════════════════════════════════════════════════════════
