@@ -128,11 +128,11 @@
         // 밸런스 상수
         const BALANCE = {
             clickBase: 1,
-            clickGrowth: 3,        // 레벨당 +3 (선형 성장)
+            clickGrowth: 5,        // 레벨당 +3 (선형 성장)
             autoBase: 1,
-            autoGrowth: 2,         // 레벨당 +2
+            autoGrowth: 5,         // 레벨당 +2
             upgradeCostBase: 100,
-            upgradeCostGrowth: 1.15, // 15% 증가 (지수 완화)
+            upgradeCostGrowth: 1.07, // 15% 증가 (지수 완화)
             critChance: 0.05,      // 기본 5%
             critMulti: 3,          // 3배
             prestigeThreshold: 1000000, // 100만 골드
@@ -142,10 +142,10 @@
         // 게임 상태
         let gameState = {
             // 기본
-            gold: 0,
+            gold: 1000,
             totalGoldEarned: 0,
             clickLevel: 1,
-            autoLevel: 0,
+            autoLevel: 1,
 
             // 환생
             prestige: 0,
@@ -370,7 +370,16 @@
 
         // 강화 비용 계산
         function getUpgradeCost(type, level) {
-            return Math.floor(BALANCE.upgradeCostBase * Math.pow(BALANCE.upgradeCostGrowth, level - 1));
+            let base = BALANCE.upgradeCostBase * Math.pow(BALANCE.upgradeCostGrowth, level - 1);
+
+            // 초반 할인
+            if (level < 50) {
+                base *= 0.5;   // 50% 할인
+            } else if (level < 50) {
+                base *= 0.7;
+            }
+
+            return Math.floor(base);
         }
 
         // 다중 강화 비용
@@ -1323,7 +1332,7 @@
             }
         });
 
-        // 스크롤 (상점 페이지)
+        // 스크롤 
         inputLayer.addEventListener('wheel', (e) => {
             const rect = canvas.getBoundingClientRect();
             const y = (e.clientY - rect.top) * (640 / rect.height);
@@ -1344,6 +1353,105 @@
                 const maxScroll = 1000; // 임시 
                 gameState.scrollOffset = Math.max(0, Math.min(gameState.scrollOffset, maxScroll));
             }
+        });
+
+        // 터치
+        let isDragging = false;
+        let startY = 0;
+        let startX = 0;
+        let lastY = 0;
+        let lastX = 0;
+        let velocityY = 0;
+        let velocityX = 0;
+        let isTabArea = false;
+
+        inputLayer.addEventListener('touchstart', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const touch = e.touches[0];
+
+            const x = (touch.clientX - rect.left) * (360 / rect.width);
+            const y = (touch.clientY - rect.top) * (640 / rect.height);
+
+            isDragging = true;
+            startY = lastY = y;
+            startX = lastX = x;
+            velocityY = 0;
+            velocityX = 0;
+
+            // 탭 영역인지 판단
+            isTabArea = y >= 580;
+        });
+
+        inputLayer.addEventListener('touchmove', (e) => {
+            if (!isDragging) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const touch = e.touches[0];
+
+            const x = (touch.clientX - rect.left) * (360 / rect.width);
+            const y = (touch.clientY - rect.top) * (640 / rect.height);
+
+            const deltaY = lastY - y;
+            const deltaX = lastX - x;
+
+            velocityY = deltaY;
+            velocityX = deltaX;
+
+            // 탭 영역 → 가로 스크롤
+            if (isTabArea) {
+                gameState.tabScroll += deltaX;
+
+                const maxScroll = (70 * 9) - 360;
+                gameState.tabScroll = Math.max(0, Math.min(gameState.tabScroll, maxScroll));
+            }
+
+            // 컨텐츠 영역 → 세로 스크롤
+            else if (Assets[gameState.currentTab] || gameState.currentTab === '스킬') {
+                gameState.scrollOffset += deltaY;
+
+                const totalHeight = 1000; // 임시
+                const maxScroll = totalHeight - 500;
+
+                gameState.scrollOffset = Math.max(0, Math.min(gameState.scrollOffset, maxScroll));
+            }
+
+            lastY = y;
+            lastX = x;
+
+            e.preventDefault(); // 중요 (모바일 스크롤 막기)
+        }, { passive: false });
+
+        inputLayer.addEventListener('touchend', () => {
+            isDragging = false;
+
+            // 관성 효과
+            const friction = 0.95;
+
+            function inertia() {
+                if (Math.abs(velocityY) < 0.1 && Math.abs(velocityX) < 0.1) return;
+
+                if (isTabArea) {
+                    gameState.tabScroll += velocityX;
+
+                    const maxScroll = (70 * 9) - 360;
+                    gameState.tabScroll = Math.max(0, Math.min(gameState.tabScroll, maxScroll));
+
+                    velocityX *= friction;
+                } else {
+                    gameState.scrollOffset += velocityY;
+
+                    const totalHeight = 1000;
+                    const maxScroll = totalHeight - 500;
+
+                    gameState.scrollOffset = Math.max(0, Math.min(gameState.scrollOffset, maxScroll));
+
+                    velocityY *= friction;
+                }
+
+                requestAnimationFrame(inertia);
+            }
+
+            inertia();
         });
 
         // ═══════════════════════════════════════════════════════════
