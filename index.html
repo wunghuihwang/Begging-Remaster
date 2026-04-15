@@ -402,6 +402,9 @@
                 power *= BALANCE.critMulti;
                 shakeAmount = 10;
                 spawnCritEffect(x, y);
+                playCoinSound(true); // ⭐ 크리티컬 코인 소리
+            } else {
+                playCoinSound(false); // ⭐ 일반 코인 소리
             }
 
             // 골드 보너스 스킬
@@ -418,12 +421,8 @@
             gameState.totalGoldEarned += power;
             goldPulse = 1;
 
-            // 파티클 생성
             spawnParticle(x, y, power, isCrit);
-
-            // 업적 체크
             checkAchievements();
-
             save();
         }
 
@@ -1173,14 +1172,15 @@
 
         function drawTabBar() {
             const tabs = ['구걸', '강화', '스킬', '부동산', '미술품', '기업', '도시', '자산', '환생'];
-            const tabWidth = 360 / tabs.length;
+            const tabWidth = 70;
+            const offsetX = gameState.tabScroll || 0;
 
             // 배경
             ctx.fillStyle = '#0f172a';
             ctx.fillRect(0, 580, 360, 60);
 
             tabs.forEach((tab, i) => {
-                const x = i * tabWidth;
+                const x = i * tabWidth - offsetX;
                 const isActive = gameState.currentTab === tab;
 
                 // 활성 표시
@@ -1325,12 +1325,24 @@
 
         // 스크롤 (상점 페이지)
         inputLayer.addEventListener('wheel', (e) => {
-            if (Assets[gameState.currentTab]) {
+            const rect = canvas.getBoundingClientRect();
+            const y = (e.clientY - rect.top) * (640 / rect.height);
+
+            // 탭 영역 (하단 580~640)
+            if (y >= 580) {
+                gameState.tabScroll = (gameState.tabScroll || 0) + e.deltaY * 0.5;
+
+                const maxScroll = (70 * 9) - 360;
+                gameState.tabScroll = Math.max(0, Math.min(gameState.tabScroll, maxScroll));
+            }
+
+            // 컨텐츠 영역 (상점 / 스킬 등)
+            else if (Assets[gameState.currentTab] || gameState.currentTab === '스킬') {
                 gameState.scrollOffset += e.deltaY * 0.5;
-                gameState.scrollOffset = Math.max(0, gameState.scrollOffset);
-            } else if (gameState.currentTab === '스킬') {
-                gameState.scrollOffset += e.deltaY * 0.5;
-                gameState.scrollOffset = Math.max(0, gameState.scrollOffset);
+
+                // 최대 스크롤 제한
+                const maxScroll = 1000; // 임시 
+                gameState.scrollOffset = Math.max(0, Math.min(gameState.scrollOffset, maxScroll));
             }
         });
 
@@ -1367,6 +1379,38 @@
             } catch (e) {
                 // 사운드 실패는 무시
             }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // 🎵 코인 사운드
+        // ═══════════════════════════════════════════════════════════
+        function playCoinSound(isCrit = false) {
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+                const oscillator = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+
+                if (isCrit) {
+                    // ⭐ 크리티컬: 화려한 소리
+                    oscillator.type = 'triangle';
+                    oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
+                    oscillator.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.1);
+                    gainNode.gain.value = 0.2;
+                    oscillator.start();
+                    oscillator.stop(audioCtx.currentTime + 0.15);
+                } else {
+                    // 💰 일반 코인
+                    oscillator.type = 'square';
+                    oscillator.frequency.value = 600;
+                    gainNode.gain.value = 0.1;
+                    oscillator.start();
+                    oscillator.stop(audioCtx.currentTime + 0.05);
+                }
+            } catch (e) { }
         }
 
         // ═══════════════════════════════════════════════════════════
