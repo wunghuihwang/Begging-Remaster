@@ -4,20 +4,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>구걸 마스터: 프리미엄 에디션</title>
+    <title>구걸 마스터: 밸런스 패치 v2.1</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
 
         :root {
-            --bg-dark: #0f172a;
-            --bg-card: #1e293b;
-            --primary: #3b82f6;
+            --bg-dark: #0a0e1a;
+            --bg-card: #1a1f35;
+            --bg-card-hover: #242b45;
+            --primary: #4f46e5;
+            --primary-light: #6366f1;
             --success: #10b981;
             --warning: #fbbf24;
             --danger: #ef4444;
+            --purple: #a855f7;
+            --cyan: #06b6d4;
             --text-light: #f1f5f9;
             --text-dim: #94a3b8;
             --disabled: #475569;
+            --border: #334155;
         }
 
         * {
@@ -27,7 +32,7 @@
         }
 
         body {
-            background: var(--bg-dark);
+            background: linear-gradient(135deg, #0a0e1a 0%, #1a1f35 100%);
             display: flex;
             justify-content: center;
             align-items: center;
@@ -40,11 +45,11 @@
             position: relative;
             width: 360px;
             height: 640px;
-            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
-            border-radius: 20px;
+            background: linear-gradient(135deg, #1a1f35 0%, #0a0e1a 100%);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(99, 102, 241, 0.2);
+            border-radius: 24px;
             overflow: hidden;
-            border: 2px solid #334155;
+            border: 2px solid rgba(99, 102, 241, 0.3);
         }
 
         canvas {
@@ -61,14 +66,13 @@
             z-index: 100;
         }
 
-        /* 로딩 화면 */
         #loadingScreen {
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background: var(--bg-dark);
+            background: linear-gradient(135deg, #0a0e1a 0%, #1a1f35 100%);
             display: flex;
             justify-content: center;
             align-items: center;
@@ -109,10 +113,9 @@
             <p style="color: var(--text-dim); margin-top: 20px;">로딩 중...</p>
         </div>
     </div>
-
     <script>
         // ═══════════════════════════════════════════════════════════
-        // 🎮 게임 코어 시스템
+        // 🎮 게임 코어 시스템 v2.1 (밸런스 패치)
         // ═══════════════════════════════════════════════════════════
 
         const canvas = document.getElementById('gameCanvas');
@@ -120,311 +123,351 @@
         const inputLayer = document.getElementById('inputLayer');
         const loadingScreen = document.getElementById('loadingScreen');
 
-        // 상수 정의
-        const SAVE_KEY = "beggar_premium_v1";
+        const SAVE_KEY = "beggar_premium_v2.1";
         const FPS = 60;
-        const AUTO_TICK_RATE = 60; // 1초마다 자동 수익
+        const AUTO_TICK_RATE = 60;
 
         // 밸런스 상수
         const BALANCE = {
             clickBase: 1,
-            clickGrowth: 5,        // 레벨당 +3 (선형 성장)
+            clickGrowth: 5,
             autoBase: 1,
-            autoGrowth: 5,         // 레벨당 +2
+            autoGrowth: 5,
             upgradeCostBase: 100,
-            upgradeCostGrowth: 1.07, // 15% 증가 (지수 완화)
-            critChance: 0.05,      // 기본 5%
-            critMulti: 3,          // 3배
-            prestigeThreshold: 1000000, // 100만 골드
-            prestigeBonus: 0.1,    // 10% 영구 증가
+            upgradeCostGrowth: 1.08, // 비용 증가폭 상향
+            critChance: 0.05,
+            critMulti: 3,
+            prestigeThreshold: 1000000,
+            prestigeBonus: 0.08,
+            diamondDropChance: 0.001,
+            diamondDropChanceCrit: 0.01,
         };
+
+        // 치트키
+        let autoClicker = { enabled: false, speed: 100 };
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'A' || e.key === 'a') {
+                autoClicker.enabled = !autoClicker.enabled;
+                console.log('오토클릭:', autoClicker.enabled ? 'ON' : 'OFF');
+            }
+        });
 
         // 게임 상태
         let gameState = {
-            // 기본
-            gold: 1000,
-            totalGoldEarned: 0,
-            clickLevel: 1,
-            autoLevel: 1,
-
-            // 환생
-            prestige: 0,
-            prestigeBonus: 1.0,
-
-            // 자산
-            ownedItems: {
-                '부동산': [],
-                '미술품': [],
-                '기업': [],
-                '도시': []
-            },
-
-            // 스킬 트리 (포인트 기반)
-            skillPoints: 0,
+            gold: 0, diamond: 0, totalGoldEarned: 0, totalDiamondEarned: 0,
+            clickLevel: 1, autoLevel: 0,
+            prestige: 0, prestigeBonus: 1.0,
+            ownedItems: { '부동산': [], '미술품': [], '기업': [], '도시': [] },
+            // skillPoints 제거
             skills: {
-                clickPower: 0,    // 클릭 강화 (최대 10)
-                autoSpeed: 0,     // 자동 속도 (최대 10)
-                critBoost: 0,     // 크리티컬 (최대 10)
-                goldBonus: 0,     // 골드 보너스 (최대 10)
-                assetBoost: 0     // 자산 효율 (최대 10)
+                clickPower: 0,      // 클릭 파워
+                autoSpeed: 0,       // 자동 속도
+                critChance: 0,      // 크리티컬 확률 (신규)
+                critDamage: 0,      // 크리티컬 데미지 (변경)
+                goldBonus: 0,       // 골드 보너스
+                assetBoost: 0       // 자산 효율
             },
-
-            // 이벤트
-            currentEvent: null,
-            eventTimer: 0,
-
-            // 업적
-            achievements: {
-                firstClick: false,
-                gold1k: false,
-                gold100k: false,
-                gold1m: false,
-                firstAsset: false,
-                collector10: false,
-                prestige1: false,
-                skill5: false
-            },
-
-            // UI
-            currentTab: '구걸',
-            scrollOffset: 0,
-            notification: null
+            shopItems: { autoClicker: false },
+            relics: [], relicInventory: {},
+            currentEvent: null, eventTimer: 0,
+            achievements: { /* ... */ },
+            currentTab: '구걸', scrollOffset: 0, tabScroll: 0, notification: null,
         };
 
-        // 자산 데이터 (가격 조정 - 현실적인 성장 곡선)
+        // 자산 데이터 (가격 대폭 상향)
         const Assets = {
             '부동산': [
-                { n: "🏞️ 공원 벤치", p: 500, desc: "클릭 +10%" },
-                { n: "⛺ 낡은 텐트", p: 2000, desc: "클릭 +15%" },
-                { n: "📦 컨테이너", p: 8000, desc: "클릭 +20%" },
-                { n: "🏠 반지하방", p: 30000, desc: "클릭 +30%" },
-                { n: "🏢 옥탑방", p: 100000, desc: "클릭 +50%" },
-                { n: "🏘️ 원룸", p: 500000, desc: "클릭 +80%" },
-                { n: "🏗️ 신축 빌라", p: 2000000, desc: "클릭 +120%" },
-                { n: "🏬 아파트", p: 10000000, desc: "클릭 +200%" },
-                { n: "🏰 강남 빌딩", p: 50000000, desc: "클릭 +300%" },
-                { n: "🏛️ 서울역", p: 200000000, desc: "클릭 +500%" }
+                { n: "🏞️ 공원 벤치", p: 500, desc: "클릭 +10%" }, { n: "⛺ 낡은 텐트", p: 2000, desc: "클릭 +15%" },
+                { n: "📦 컨테이너", p: 8000, desc: "클릭 +20%" }, { n: "🏠 반지하방", p: 30000, desc: "클릭 +30%" },
+                { n: "🏢 옥탑방", p: 120000, desc: "클릭 +50%" }, { n: "🏘️ 원룸", p: 500000, desc: "클릭 +80%" },
+                { n: "🏗️ 신축 빌라", p: 2500000, desc: "클릭 +120%" }, { n: "🏬 아파트", p: 12000000, desc: "클릭 +200%" },
+                { n: "🏰 강남 빌딩", p: 80000000, desc: "클릭 +300%" }, { n: "🏛️ 서울역", p: 500000000, desc: "클릭 +500%" },
+                { n: "🏭 공장 단지", p: 2500000000, desc: "클릭 +800%" }, { n: "🏟️ 스타디움", p: 15000000000, desc: "클릭 +1200%" },
+                { n: "🏝️ 개인 섬", p: 100000000000, desc: "클릭 +1800%" }, { n: "🛫 국제공항", p: 800000000000, desc: "클릭 +2500%" },
+                { n: "🏙️ 금융지구", p: 5000000000000, desc: "클릭 +3500%" }, { n: "🌉 랜드마크", p: 25000000000000, desc: "클릭 +5000%" },
+                { n: "🗻 산악도시", p: 150000000000000, desc: "클릭 +7000%" }, { n: "🏔️ 스키리조트", p: 1000000000000000, desc: "클릭 +10000%" },
+                { n: "🌴 열대낙원", p: 8000000000000000, desc: "클릭 +15000%" }, { n: "🌌 우주정거장", p: 50000000000000000, desc: "클릭 +25000%" }
             ],
             '미술품': [
-                { n: "🎨 낙서", p: 1000, desc: "크리티컬 +1%" },
-                { n: "🖼️ 벽화", p: 5000, desc: "크리티컬 +2%" },
-                { n: "🏺 도자기", p: 20000, desc: "크리티컬 +3%" },
-                { n: "🌄 풍경화", p: 80000, desc: "크리티컬 +5%" },
-                { n: "🗿 조각상", p: 300000, desc: "크리티컬 +8%" },
-                { n: "🎭 추상화", p: 1500000, desc: "크리티컬 +12%" },
-                { n: "💎 국보 도자기", p: 6000000, desc: "크리티컬 +20%" },
-                { n: "🖌️ 명화 복제", p: 30000000, desc: "크리티컬 +30%" },
-                { n: "🎨 피카소 진품", p: 150000000, desc: "크리티컬 +50%" },
-                { n: "🌟 레오나르도", p: 1000000000, desc: "크리티컬 +100%" }
+                { n: "🎨 낙서", p: 1000, desc: "크리티컬 +1%" }, { n: "🖼️ 벽화", p: 5000, desc: "크리티컬 +2%" },
+                { n: "🏺 도자기", p: 20000, desc: "크리티컬 +3%" }, { n: "🌄 풍경화", p: 100000, desc: "크리티컬 +5%" },
+                { n: "🗿 조각상", p: 500000, desc: "크리티컬 +8%" }, { n: "🎭 추상화", p: 2500000, desc: "크리티컬 +12%" },
+                { n: "💎 국보 도자기", p: 15000000, desc: "크리티컬 +20%" }, { n: "🖌️ 명화 복제", p: 100000000, desc: "크리티컬 +30%" },
+                { n: "🎨 피카소 진품", p: 800000000, desc: "크리티컬 +50%" }, { n: "🌟 레오나르도", p: 5000000000, desc: "크리티컬 +100%" },
+                { n: "🖼️ 모네 수련", p: 30000000000, desc: "크리티컬 +150%" }, { n: "🎭 고흐 별밤", p: 200000000000, desc: "크리티컬 +220%" },
+                { n: "🗿 미켈란젤로", p: 1500000000000, desc: "크리티컬 +320%" }, { n: "💫 클림트 키스", p: 10000000000000, desc: "크리티컬 +450%" },
+                { n: "🎨 달리 시계", p: 80000000000000, desc: "크리티컬 +650%" }, { n: "🖌️ 뭉크 절규", p: 600000000000000, desc: "크리티컬 +900%" },
+                { n: "🌈 칸딘스키", p: 5000000000000000, desc: "크리티컬 +1300%" }, { n: "🎭 폴록 작품", p: 40000000000000000, desc: "크리티컬 +1800%" },
+                { n: "💎 로댕 조각", p: 300000000000000000, desc: "크리티컬 +2500%" }, { n: "🌟 신의 걸작", p: 2500000000000000000, desc: "크리티컬 +4000%" }
             ],
             '기업': [
-                { n: "🍢 붕어빵 노점", p: 3000, desc: "자동 +20%" },
-                { n: "🍗 치킨집", p: 15000, desc: "자동 +30%" },
-                { n: "🏪 편의점", p: 60000, desc: "자동 +50%" },
-                { n: "🛒 동네 마트", p: 250000, desc: "자동 +80%" },
-                { n: "💻 IT 스타트업", p: 1000000, desc: "자동 +120%" },
-                { n: "🏗️ 건설사", p: 5000000, desc: "자동 +200%" },
-                { n: "🎬 엔터사", p: 25000000, desc: "자동 +300%" },
-                { n: "🚗 자동차", p: 100000000, desc: "자동 +500%" },
-                { n: "🔬 반도체", p: 500000000, desc: "자동 +800%" },
-                { n: "🌐 G-그룹", p: 5000000000, desc: "자동 +1500%" }
+                { n: "🍢 붕어빵 노점", p: 3000, desc: "자동 +20%" }, { n: "🍗 치킨집", p: 15000, desc: "자동 +30%" },
+                { n: "🏪 편의점", p: 80000, desc: "자동 +50%" }, { n: "🛒 동네 마트", p: 400000, desc: "자동 +80%" },
+                { n: "💻 IT 스타트업", p: 2000000, desc: "자동 +120%" }, { n: "🏗️ 건설사", p: 10000000, desc: "자동 +200%" },
+                { n: "🎬 엔터사", p: 60000000, desc: "자동 +300%" }, { n: "🚗 자동차", p: 400000000, desc: "자동 +500%" },
+                { n: "🔬 반도체", p: 2500000000, desc: "자동 +800%" }, { n: "🌐 G-그룹", p: 20000000000, desc: "자동 +1500%" },
+                { n: "🏦 투자은행", p: 150000000000, desc: "자동 +2200%" }, { n: "🛢️ 에너지 재벌", p: 1200000000000, desc: "자동 +3200%" },
+                { n: "📡 통신 제국", p: 10000000000000, desc: "자동 +4500%" }, { n: "🚀 우주항공", p: 80000000000000, desc: "자동 +6500%" },
+                { n: "🧬 바이오텍", p: 700000000000000, desc: "자동 +9000%" }, { n: "⚡ 전력 독점", p: 6000000000000000, desc: "자동 +13000%" },
+                { n: "🌊 해양 개발", p: 50000000000000000, desc: "자동 +18000%" }, { n: "🤖 AI 연구소", p: 450000000000000000, desc: "자동 +25000%" },
+                { n: "🔮 양자컴퓨팅", p: 4000000000000000000, desc: "자동 +35000%" }, { n: "🌌 은하 재단", p: 35000000000000000000, desc: "자동 +50000%" }
             ],
             '도시': [
-                { n: "🏙️ 판교", p: 10000, desc: "전체 +5%" },
-                { n: "🌆 분당", p: 50000, desc: "전체 +8%" },
-                { n: "🏘️ 일산", p: 200000, desc: "전체 +12%" },
-                { n: "⚓ 인천", p: 1000000, desc: "전체 +18%" },
-                { n: "🌊 부산", p: 5000000, desc: "전체 +25%" },
-                { n: "🏯 서울", p: 30000000, desc: "전체 +35%" },
-                { n: "🗼 도쿄", p: 150000000, desc: "전체 +50%" },
-                { n: "🗽 뉴욕", p: 1000000000, desc: "전체 +75%" },
-                { n: "🌍 지구", p: 10000000000, desc: "전체 +120%" },
-                { n: "🚀 화성", p: 100000000000, desc: "전체 +200%" }
+                { n: "🏙️ 판교", p: 10000, desc: "전체 +5%" }, { n: "🌆 분당", p: 50000, desc: "전체 +8%" },
+                { n: "🏘️ 일산", p: 250000, desc: "전체 +12%" }, { n: "⚓ 인천", p: 1500000, desc: "전체 +18%" },
+                { n: "🌊 부산", p: 8000000, desc: "전체 +25%" }, { n: "🏯 서울", p: 50000000, desc: "전체 +35%" },
+                { n: "🗼 도쿄", p: 300000000, desc: "전체 +50%" }, { n: "🗽 뉴욕", p: 2000000000, desc: "전체 +75%" },
+                { n: "🌍 지구", p: 15000000000, desc: "전체 +120%" }, { n: "🚀 화성", p: 120000000000, desc: "전체 +200%" },
+                { n: "🪐 목성", p: 1000000000000, desc: "전체 +300%" }, { n: "💫 토성 링", p: 8000000000000, desc: "전체 +450%" },
+                { n: "🌌 은하수", p: 70000000000000, desc: "전체 +650%" }, { n: "🔭 안드로메다", p: 600000000000000, desc: "전체 +900%" },
+                { n: "⭐ 성운", p: 5000000000000000, desc: "전체 +1300%" }, { n: "🌠 초신성", p: 45000000000000000, desc: "전체 +1800%" },
+                { n: "🕳️ 블랙홀", p: 400000000000000000, desc: "전체 +2500%" }, { n: "🌀 웜홀", p: 3500000000000000000, desc: "전체 +3500%" },
+                { n: "🔮 다차원", p: 30000000000000000000, desc: "전체 +5000%" }, { n: "∞ 무한우주", p: 250000000000000000000, desc: "전체 +10000%" }
             ]
         };
 
-        // 이벤트 풀
+        // 상점 아이템
+        const ShopItems = {
+            // 변경: duration 300 → 30 (30초)
+            clickPotion5: { name: "⚡ 터치 물약 5배", price: 50000, duration: 3000, multiplier: 5, type: 'click' },
+            clickPotion10: { name: "⚡⚡ 터치 물약 10배", price: 200000, duration: 3000, multiplier: 10, type: 'click' },
+            clickPotion100: { name: "⚡⚡⚡ 터치 물약 100배", price: 2000000, duration: 3000, multiplier: 100, type: 'click' },
+            autoPotion5: { name: "🤖 자동 물약 5배", price: 50000, duration: 3000, multiplier: 5, type: 'auto' },
+            autoPotion10: { name: "🤖🤖 자동 물약 10배", price: 200000, duration: 3000, multiplier: 10, type: 'auto' },
+            autoPotion100: { name: "🤖🤖🤖 자동 물약 100배", price: 2000000, duration: 3000, multiplier: 100, type: 'auto' },
+            autoClicker: { name: "🔄 자동 터치", price: 50000000, requirePrestige: 20, permanent: true }
+        };
+
+        // 유물 데이터
+        const Relics = [
+            { id: 'gold_crown', name: '👑 황금 왕관', rarity: 'legendary', effect: 'gold', value: 0.5, desc: '모든 골드 획득 +50%' },
+            { id: 'crit_sword', name: '⚔️ 크리티컬 검', rarity: 'legendary', effect: 'crit', value: 0.2, desc: '크리티컬 확률 +20%' },
+            { id: 'speed_boots', name: '👢 신속의 장화', rarity: 'epic', effect: 'auto', value: 0.3, desc: '자동 수익 +30%' },
+            { id: 'power_ring', name: '💍 파워 링', rarity: 'epic', effect: 'click', value: 0.3, desc: '클릭 파워 +30%' },
+            { id: 'lucky_coin', name: '🪙 행운의 동전', rarity: 'rare', effect: 'diamond', value: 0.05, desc: '다이아 드랍률 +5%' },
+            { id: 'magic_book', name: '📖 마법서', rarity: 'rare', effect: 'skill', value: 0.15, desc: '스킬 효과 +15%' },
+            { id: 'prestige_gem', name: '💎 환생의 보석', rarity: 'epic', effect: 'prestige', value: 0.25, desc: '환생 보너스 +25%' },
+            { id: 'time_watch', name: '⌚ 시간의 시계', rarity: 'rare', effect: 'event', value: 1.5, desc: '이벤트 효과 +50%' },
+            { id: 'fortune_cat', name: '🐱 행운의 고양이', rarity: 'common', effect: 'gold', value: 0.2, desc: '골드 획득 +20%' },
+            { id: 'bronze_medal', name: '🥉 동 메달', rarity: 'common', effect: 'click', value: 0.1, desc: '클릭 파워 +10%' },
+            { id: 'silver_medal', name: '🥈 은 메달', rarity: 'common', effect: 'auto', value: 0.1, desc: '자동 수익 +10%' },
+            { id: 'gold_medal', name: '🥇 금 메달', rarity: 'rare', effect: 'all', value: 0.15, desc: '모든 능력 +15%' },
+            { id: 'ancient_scroll', name: '📜 고대 두루마리', rarity: 'legendary', effect: 'all', value: 0.3, desc: '모든 능력 +30%' },
+            { id: 'phoenix_feather', name: '🪶 불사조 깃털', rarity: 'epic', effect: 'prestige', value: 0.2, desc: '환생 보너스 +20%' },
+            { id: 'dragon_scale', name: '🐉 드래곤 비늘', rarity: 'legendary', effect: 'crit', value: 0.15, desc: '크리티컬 확률 +15%' }
+        ];
+
+        const RarityColors = { common: '#94a3b8', rare: '#3b82f6', epic: '#a855f7', legendary: '#fbbf24' };
+
         const Events = [
             { name: "💰 럭키 타임!", effect: "gold", value: 2, duration: 600, color: "#fbbf24" },
             { name: "⚡ 초스피드!", effect: "auto", value: 3, duration: 450, color: "#3b82f6" },
             { name: "🎯 크리티컬!", effect: "crit", value: 2, duration: 450, color: "#ef4444" },
             { name: "💪 파워업!", effect: "click", value: 2, duration: 600, color: "#10b981" },
-            { name: "🌧️ 불경기...", effect: "gold", value: 0.5, duration: 300, color: "#64748b" }
+            { name: "🌧️ 불경기...", effect: "gold", value: 0.5, duration: 300, color: "#64748b" },
+            { name: "💎 다이아 폭풍!", effect: "diamond", value: 5, duration: 450, color: "#a855f7" }
         ];
 
-        // 파티클 시스템
         let particles = [];
         let frameCount = 0;
         let clickBoxes = [];
-
-        // 애니메이션
-        let shakeAmount = 0;
-        let goldPulse = 0;
+        let shakeAmount = 0, goldPulse = 0, diamondPulse = 0;
         let buttonPulses = new Map();
+        let activePotions = []; // { type, multiplier, timer }
 
         // ═══════════════════════════════════════════════════════════
-        // 💾 저장/로드
+        // 저장/로드
         // ═══════════════════════════════════════════════════════════
 
-        function save() {
-            localStorage.setItem(SAVE_KEY, JSON.stringify(gameState));
-        }
-
+        function save() { localStorage.setItem(SAVE_KEY, JSON.stringify(gameState)); }
         function load() {
             const data = localStorage.getItem(SAVE_KEY);
             if (data) {
-                const loaded = JSON.parse(data);
-                gameState = { ...gameState, ...loaded };
-                // 누락된 필드 보정
-                if (!gameState.skills) gameState.skills = {
-                    clickPower: 0, autoSpeed: 0, critBoost: 0, goldBonus: 0, assetBoost: 0
-                };
-                if (!gameState.achievements) gameState.achievements = {
-                    firstClick: false, gold1k: false, gold100k: false, gold1m: false,
-                    firstAsset: false, collector10: false, prestige1: false, skill5: false
-                };
+                try {
+                    const loaded = JSON.parse(data);
+                    gameState = { ...gameState, ...loaded };
+
+                    // skillPoints 마이그레이션
+                    if (gameState.skillPoints !== undefined) {
+                        gameState.diamond = (gameState.diamond || 0) + (gameState.skillPoints || 0);
+                        delete gameState.skillPoints;
+                    }
+
+                    // 기존 critBoost → critChance + critDamage 분리
+                    if (gameState.skills?.critBoost !== undefined) {
+                        const oldLevel = gameState.skills.critBoost;
+                        gameState.skills.critChance = Math.floor(oldLevel / 2);
+                        gameState.skills.critDamage = Math.floor(oldLevel / 2);
+                        delete gameState.skills.critBoost;
+                    }
+
+                    // 기본값 설정
+                    if (!gameState.skills) {
+                        gameState.skills = {
+                            clickPower: 0, autoSpeed: 0, critChance: 0,
+                            critDamage: 0, goldBonus: 0, assetBoost: 0
+                        };
+                    }
+
+                    if (gameState.skills.critChance === undefined) {
+                        gameState.skills.critChance = 0;
+                    }
+                    if (gameState.skills.critDamage === undefined) {
+                        gameState.skills.critDamage = 0;
+                    }
+
+                } catch (e) {
+                    console.error("로드 실패", e);
+                }
             }
         }
-
         // ═══════════════════════════════════════════════════════════
-        // 📊 계산 함수
+        // 계산 함수
         // ═══════════════════════════════════════════════════════════
 
-        // 클릭 파워 계산
+        function getRelicBonus(effect) {
+            let bonus = 0;
+            if (!gameState.relicInventory) return 0;
+            Object.keys(gameState.relicInventory).forEach(relicId => {
+                const relic = Relics.find(r => r.id === relicId);
+                if (relic && (relic.effect === effect || relic.effect === 'all')) bonus += relic.value;
+            });
+            return bonus;
+        }
+
         function getClickPower() {
             let base = BALANCE.clickBase + (gameState.clickLevel - 1) * BALANCE.clickGrowth;
-
-            // 부동산 보너스 (10%, 15%, 20%, ...)
             let realEstateMult = 1;
             gameState.ownedItems['부동산'].forEach(idx => {
-                realEstateMult += [0.1, 0.15, 0.2, 0.3, 0.5, 0.8, 1.2, 2.0, 3.0, 5.0][idx];
+                const bonuses = [0.1, 0.15, 0.2, 0.3, 0.5, 0.8, 1.2, 2.0, 3.0, 5.0, 8.0, 12.0, 18.0, 25.0, 35.0, 50.0, 70.0, 100.0, 150.0, 250.0];
+                realEstateMult += bonuses[idx] || 0;
             });
-
-            // 도시 보너스
             let cityMult = 1;
             gameState.ownedItems['도시'].forEach(idx => {
-                cityMult += [0.05, 0.08, 0.12, 0.18, 0.25, 0.35, 0.5, 0.75, 1.2, 2.0][idx];
+                const bonuses = [0.05, 0.08, 0.12, 0.18, 0.25, 0.35, 0.5, 0.75, 1.2, 2.0, 3.0, 4.5, 6.5, 9.0, 13.0, 18.0, 25.0, 35.0, 50.0, 100.0];
+                cityMult += bonuses[idx] || 0;
             });
-
-            // 스킬 보너스
-            let skillMult = 1 + (gameState.skills.clickPower * 0.15); // 15%씩
-
-            // 환생 보너스
+            let skillMult = 1 + (gameState.skills.clickPower * 0.1); // 15% -> 10%
             let prestigeMult = gameState.prestigeBonus;
-
-            // 이벤트 보너스
             let eventMult = (gameState.currentEvent?.effect === 'click') ? gameState.currentEvent.value : 1;
-
-            return Math.floor(base * realEstateMult * cityMult * skillMult * prestigeMult * eventMult);
+            let relicMult = 1 + getRelicBonus('click');
+            let potionMult = 1;
+            activePotions.forEach(p => { if (p.type === 'click') potionMult = Math.max(potionMult, p.multiplier); });
+            return Math.floor(base * realEstateMult * cityMult * skillMult * prestigeMult * eventMult * relicMult * potionMult);
         }
 
-        // 자동 수익 계산
         function getAutoIncome() {
             if (gameState.autoLevel === 0) return 0;
-
             let base = BALANCE.autoBase + (gameState.autoLevel - 1) * BALANCE.autoGrowth;
-
-            // 기업 보너스
             let corpMult = 1;
             gameState.ownedItems['기업'].forEach(idx => {
-                corpMult += [0.2, 0.3, 0.5, 0.8, 1.2, 2.0, 3.0, 5.0, 8.0, 15.0][idx];
+                const bonuses = [0.2, 0.3, 0.5, 0.8, 1.2, 2.0, 3.0, 5.0, 8.0, 15.0, 22.0, 32.0, 45.0, 65.0, 90.0, 130.0, 180.0, 250.0, 350.0, 500.0];
+                corpMult += bonuses[idx] || 0;
             });
-
-            // 도시 보너스
             let cityMult = 1;
             gameState.ownedItems['도시'].forEach(idx => {
-                cityMult += [0.05, 0.08, 0.12, 0.18, 0.25, 0.35, 0.5, 0.75, 1.2, 2.0][idx];
+                const bonuses = [0.05, 0.08, 0.12, 0.18, 0.25, 0.35, 0.5, 0.75, 1.2, 2.0, 3.0, 4.5, 6.5, 9.0, 13.0, 18.0, 25.0, 35.0, 50.0, 100.0];
+                cityMult += bonuses[idx] || 0;
             });
-
-            // 스킬 보너스
-            let skillMult = 1 + (gameState.skills.autoSpeed * 0.2); // 20%씩
-
-            // 환생 보너스
+            let skillMult = 1 + (gameState.skills.autoSpeed * 0.15);
             let prestigeMult = gameState.prestigeBonus;
-
-            // 이벤트 보너스
             let eventMult = (gameState.currentEvent?.effect === 'auto') ? gameState.currentEvent.value : 1;
-
-            return Math.floor(base * corpMult * cityMult * skillMult * prestigeMult * eventMult);
+            let relicMult = 1 + getRelicBonus('auto');
+            let potionMult = 1;
+            activePotions.forEach(p => { if (p.type === 'auto') potionMult = Math.max(potionMult, p.multiplier); });
+            return Math.floor(base * corpMult * cityMult * skillMult * prestigeMult * eventMult * relicMult * potionMult);
         }
 
-        // 크리티컬 확률 계산
-        function getCritChance() {
-            let base = BALANCE.critChance;
+        // 크리티컬 데미지 계산
+        function getCritDamage() {
+            let base = BALANCE.critMulti; // 기본 3배
 
-            // 미술품 보너스
+            // 미술품으로 인한 크리티컬 데미지 증가
             gameState.ownedItems['미술품'].forEach(idx => {
-                base += [0.01, 0.02, 0.03, 0.05, 0.08, 0.12, 0.2, 0.3, 0.5, 1.0][idx];
+                const bonuses = [0.5, 0.8, 1.2, 1.8, 2.5, 3.5, 5.0, 7.0, 10.0, 15.0, 22.0, 32.0, 45.0, 65.0, 90.0, 130.0, 180.0, 250.0, 350.0, 500.0];
+                base += bonuses[idx] || 0;
             });
 
-            // 스킬 보너스
-            base += gameState.skills.critBoost * 0.05; // 5%씩
+            // 스킬로 인한 크리티컬 데미지 증가 (레벨당 +0.5배)
+            base += gameState.skills.critDamage * 0.5;
 
-            // 이벤트 보너스
+            return base;
+        }
+        function getCritChance() {
+            let base = BALANCE.critChance; // 0.05 (5%)
+
+            // 스킬로 인한 크리티컬 확률 증가 (레벨당 +2%)
+            base += gameState.skills.critChance * 0.02;
+
+            // 이벤트 효과
             if (gameState.currentEvent?.effect === 'crit') {
                 base *= gameState.currentEvent.value;
             }
 
+            // 유물 효과
+            base += getRelicBonus('crit');
+
             return Math.min(base, 0.95); // 최대 95%
         }
 
-        // 강화 비용 계산
         function getUpgradeCost(type, level) {
             let base = BALANCE.upgradeCostBase * Math.pow(BALANCE.upgradeCostGrowth, level - 1);
-
-            // 초반 할인
-            if (level < 50) {
-                base *= 0.5;   // 50% 할인
-            } else if (level < 50) {
-                base *= 0.7;
-            }
-
+            if (level < 50) base *= 0.6;
+            else if (level < 100) base *= 0.8;
             return Math.floor(base);
         }
 
-        // 다중 강화 비용
         function getMultiUpgradeCost(type, currentLevel, count) {
             let total = 0;
-            for (let i = 0; i < count; i++) {
-                total += getUpgradeCost(type, currentLevel + i);
-            }
+            for (let i = 0; i < count; i++) total += getUpgradeCost(type, currentLevel + i);
             return total;
         }
 
-        // 환생 보상 계산
+
         function getPrestigeReward() {
-            // 획득한 총 골드 기반
-            const reward = Math.floor(Math.sqrt(gameState.totalGoldEarned / BALANCE.prestigeThreshold));
-            return reward;
+            if (gameState.totalGoldEarned < BALANCE.prestigeThreshold) return 0;
+            // 3 * log10 → 2 * log10 (획득량 감소)
+            return Math.max(1, Math.floor(2 * Math.log10(gameState.totalGoldEarned / BALANCE.prestigeThreshold + 1)));
+        }
+
+        // 환생 시 다이아 보상 계산
+        function getPrestigeDiamondReward() {
+            if (gameState.totalGoldEarned < BALANCE.prestigeThreshold) return 0;
+            // 총 획득 골드에 비례하여 다이아 지급 (로그 스케일)
+            // 100만 골드당 약 5다이아, 10억 골드당 약 15다이아 정도
+            return Math.max(5, Math.floor(3 * Math.log10(gameState.totalGoldEarned / 100000 + 1)) +
+                Math.floor(gameState.prestige * 0.5)); // 기존 환생 레벨당 추가 보너스
         }
 
         // ═══════════════════════════════════════════════════════════
-        // 🎲 게임 로직
+        // 게임 로직
         // ═══════════════════════════════════════════════════════════
 
-        // 클릭 처리
         function handleClick(x, y) {
             let power = getClickPower();
             let isCrit = Math.random() < getCritChance();
 
             if (isCrit) {
-                power *= BALANCE.critMulti;
+                const critMulti = getCritDamage(); // 변경: 크리티컬 데미지 적용
+                power *= critMulti;
                 shakeAmount = 10;
                 spawnCritEffect(x, y);
-                playCoinSound(true); // ⭐ 크리티컬 코인 소리
+                playCoinSound(true);
+                tryDropDiamond(true);
             } else {
-                playCoinSound(false); // ⭐ 일반 코인 소리
+                playCoinSound(false);
+                tryDropDiamond(false);
             }
 
-            // 골드 보너스 스킬
             if (gameState.skills.goldBonus > 0) {
-                power *= (1 + gameState.skills.goldBonus * 0.1);
+                power *= (1 + gameState.skills.goldBonus * 0.08);
             }
 
-            // 이벤트 보너스
             if (gameState.currentEvent?.effect === 'gold') {
                 power *= gameState.currentEvent.value;
             }
+
+            power *= (1 + getRelicBonus('gold'));
 
             gameState.gold += power;
             gameState.totalGoldEarned += power;
@@ -435,50 +478,52 @@
             save();
         }
 
-        // 자동 수익 처리
-        function processAutoIncome() {
-            const income = getAutoIncome();
-            if (income > 0) {
-                gameState.gold += income;
-                gameState.totalGoldEarned += income;
+        function tryDropDiamond(isCrit) {
+            let chance = isCrit ? BALANCE.diamondDropChanceCrit : BALANCE.diamondDropChance;
+            if (gameState.currentEvent?.effect === 'diamond') chance *= gameState.currentEvent.value;
+            chance *= (1 + getRelicBonus('diamond'));
+            if (Math.random() < chance) {
+                const amount = isCrit ? Math.floor(Math.random() * 3) + 2 : 1;
+                gameState.diamond += amount;
+                gameState.totalDiamondEarned += amount;
+                diamondPulse = 1;
+                spawnDiamondParticle(180, 60, amount);
+                checkAchievements();
             }
         }
 
-        // 강화 구매
+        function processAutoIncome() {
+            const income = getAutoIncome();
+            if (income > 0) { gameState.gold += income; gameState.totalGoldEarned += income; }
+            if (gameState.shopItems.autoClicker && autoClicker.enabled === false) { // 치트키와 분리
+                handleClick(180, 300);
+            }
+        }
+
         function buyUpgrade(type, count = 1) {
             const level = (type === 'click') ? gameState.clickLevel : gameState.autoLevel;
             const cost = getMultiUpgradeCost(type, level, count);
-
             if (gameState.gold >= cost) {
                 gameState.gold -= cost;
-
-                if (type === 'click') {
-                    gameState.clickLevel += count;
-                } else {
-                    gameState.autoLevel += count;
-                }
-
+                if (type === 'click') gameState.clickLevel += count;
+                else gameState.autoLevel += count;
                 buttonPulses.set(type + count, 1);
                 playSound('upgrade');
-                save();
-                return true;
-            }
-            return false;
+                save(); return true;
+            } return false;
         }
 
-        // 자산 구매
         function buyAsset(category, index) {
             const asset = Assets[category][index];
-
             if (gameState.gold >= asset.p && !gameState.ownedItems[category].includes(index)) {
                 gameState.gold -= asset.p;
                 gameState.ownedItems[category].push(index);
 
-                // 스킬 포인트 획득 (10개마다 1포인트)
                 const totalAssets = Object.values(gameState.ownedItems).flat().length;
-                if (totalAssets % 10 === 0) {
-                    gameState.skillPoints++;
-                    showNotification("🎯 스킬 포인트 획득!");
+                // skillPoints 대신 다이아 지급
+                if (totalAssets % 15 === 0) {
+                    gameState.diamond += 5;
+                    showNotification("🎯 자산 컬렉션! +5💎");
                 }
 
                 buttonPulses.set(category + index, 1);
@@ -490,51 +535,74 @@
             return false;
         }
 
-        // 스킬 업그레이드
+        // 스킬 레벨별 다이아 비용 계산
+        function getSkillCost(skillId) {
+            const level = gameState.skills[skillId];
+            // 기본 비용 + 레벨당 증가 (레벨 1 = 5다이아, 100 = 500다이아)
+            return Math.floor(5 + (level * 5));
+        }
+
         function upgradeSkill(skill) {
-            if (gameState.skillPoints > 0 && gameState.skills[skill] < 10) {
-                gameState.skillPoints--;
+            const currentLevel = gameState.skills[skill];
+            const maxLevel = 100; // 최대 레벨 100으로 확장
+            const cost = getSkillCost(skill);
+
+            // skillPoints 체크 → diamond 체크
+            if (currentLevel < maxLevel && gameState.diamond >= cost) {
+                gameState.diamond -= cost;
                 gameState.skills[skill]++;
-                showNotification(`${getSkillName(skill)} 강화!`);
+
+                showNotification(`${getSkillName(skill)} Lv.${currentLevel + 1}! (-${cost}💎)`);
                 checkAchievements();
                 save();
                 return true;
+            } else if (currentLevel >= maxLevel) {
+                showNotification(`최대 레벨 도달!`);
+                return false;
+            } else {
+                showNotification(`다이아가 부족합니다! (${cost}💎 필요)`);
+                return false;
             }
-            return false;
         }
 
         function getSkillName(skill) {
             const names = {
                 clickPower: "클릭 파워",
                 autoSpeed: "자동 속도",
-                critBoost: "크리티컬",
+                critChance: "크리티컬 확률",  // 신규
+                critDamage: "크리티컬 데미지", // 변경
                 goldBonus: "골드 보너스",
                 assetBoost: "자산 효율"
             };
             return names[skill] || skill;
         }
 
-        // 환생
         function prestige() {
             if (gameState.totalGoldEarned >= BALANCE.prestigeThreshold) {
                 const reward = getPrestigeReward();
-
                 if (reward > 0) {
-                    // 리셋
-                    gameState.gold = 0;
+                    // 시작 골드 대폭 감소 (1000 * 1.5^reward → 500 * 1.2^reward)
+                    const goldReward = Math.floor(500 * Math.pow(1.2, reward));
+
+                    // 다이아 보상 계산
+                    const diamondReward = getPrestigeDiamondReward();
+
+                    gameState.gold = goldReward;
                     gameState.totalGoldEarned = 0;
                     gameState.clickLevel = 1;
                     gameState.autoLevel = 0;
                     gameState.ownedItems = { '부동산': [], '미술품': [], '기업': [], '도시': [] };
-
-                    // 보상
                     gameState.prestige += reward;
-                    gameState.prestigeBonus = 1 + (gameState.prestige * BALANCE.prestigeBonus);
 
-                    // 스킬 포인트 추가 보상
-                    gameState.skillPoints += Math.floor(reward / 2);
+                    // 다이아 지급
+                    gameState.diamond += diamondReward;
+                    gameState.totalDiamondEarned += diamondReward;
 
-                    showNotification(`🌟 환생! +${reward} 영구 보너스`);
+                    // 환생 보너스 증가율 더 완만하게
+                    gameState.prestigeBonus = 1 + (Math.log(gameState.prestige + 1) * BALANCE.prestigeBonus) + getRelicBonus('prestige');
+
+                    // 알림 메시지에 다이아 보상 추가
+                    showNotification(`🌟 환생! +${reward} Lv, ${formatGold(goldReward)}G, +${diamondReward}💎`);
                     checkAchievements();
                     save();
                     return true;
@@ -543,7 +611,7 @@
             return false;
         }
 
-        // 이벤트 시스템
+
         function updateEvent() {
             if (gameState.currentEvent) {
                 gameState.eventTimer--;
@@ -551,7 +619,6 @@
                     gameState.currentEvent = null;
                 }
             } else {
-                // 30초마다 30% 확률로 발생
                 if (frameCount % 1800 === 0 && Math.random() < 0.3) {
                     const event = Events[Math.floor(Math.random() * Events.length)];
                     gameState.currentEvent = { ...event };
@@ -561,140 +628,260 @@
             }
         }
 
-        // 업적 체크
+        function buyShopItem(itemKey) {
+            const item = ShopItems[itemKey];
+            if (item.requirePrestige && gameState.prestige < item.requirePrestige) {
+                showNotification(`환생 ${item.requirePrestige} 필요!`); return false;
+            }
+            if (item.permanent) {
+                if (!gameState.shopItems[itemKey] && gameState.gold >= item.price) {
+                    gameState.gold -= item.price;
+                    gameState.shopItems[itemKey] = true;
+                    showNotification(`${item.name} 구매 완료!`);
+                    playSound('purchase'); save(); return true;
+                }
+            } else {
+                if (gameState.gold >= item.price) {
+                    gameState.gold -= item.price;
+
+                    // 같은 타입의 기존 물약 찾기
+                    const existing = activePotions.find(p => p.type === item.type);
+                    if (existing) {
+                        // 지속시간 합산 (중첩)
+                        existing.timer += item.duration;
+                        existing.multiplier = Math.max(existing.multiplier, item.multiplier);
+                    } else {
+                        // 새 물약 추가
+                        activePotions.push({
+                            type: item.type,
+                            multiplier: item.multiplier,
+                            timer: item.duration
+                        });
+                    }
+
+                    showNotification(`${item.name} 사용! (${item.duration / 60}초)`);
+                    playSound('purchase'); save(); return true;
+                }
+            } return false;
+        }
+        function updatePotions() {
+            activePotions = activePotions.filter(potion => {
+                potion.timer--;
+                return potion.timer > 0;
+            });
+        }
+
+        function pullRelic() {
+            if (gameState.diamond >= 10) {
+                gameState.diamond -= 10;
+                const roll = Math.random();
+                let rarity;
+                if (roll < 0.01) rarity = 'legendary';
+                else if (roll < 0.10) rarity = 'epic';
+                else if (roll < 0.35) rarity = 'rare';
+                else rarity = 'common';
+                const pool = Relics.filter(r => r.rarity === rarity);
+                const relic = pool[Math.floor(Math.random() * pool.length)];
+                if (!gameState.relicInventory[relic.id]) gameState.relicInventory[relic.id] = 0;
+                gameState.relicInventory[relic.id]++;
+                showNotification(`${relic.name} 획득!`);
+                playSound('purchase');
+                checkAchievements(); save(); return relic;
+            } return null;
+        }
+
         function checkAchievements() {
             const a = gameState.achievements;
 
+            // skillPoints 증가 코드 모두 제거
             if (!a.firstClick && gameState.totalGoldEarned > 0) {
                 a.firstClick = true;
-                gameState.skillPoints++;
-                showNotification("🏆 첫 클릭! +1 스킬 포인트");
+                gameState.diamond += 1; // 대신 다이아 지급
+                showNotification("🏆 첫 클릭! +1💎");
             }
 
             if (!a.gold1k && gameState.totalGoldEarned >= 1000) {
                 a.gold1k = true;
-                gameState.skillPoints++;
-                showNotification("🏆 천금 달성! +1 스킬 포인트");
+                gameState.diamond += 2;
+                showNotification("🏆 천금 달성! +2💎");
             }
 
             if (!a.gold100k && gameState.totalGoldEarned >= 100000) {
                 a.gold100k = true;
-                gameState.skillPoints += 2;
-                showNotification("🏆 십만장자! +2 스킬 포인트");
+                gameState.diamond += 5;
+                showNotification("🏆 십만장자! +5💎");
             }
 
             if (!a.gold1m && gameState.totalGoldEarned >= 1000000) {
                 a.gold1m = true;
-                gameState.skillPoints += 3;
-                showNotification("🏆 백만장자! +3 스킬 포인트");
+                gameState.diamond += 10;
+                showNotification("🏆 백만장자! +10💎");
+            }
+
+            if (!a.gold10m && gameState.totalGoldEarned >= 10000000) {
+                a.gold10m = true;
+                gameState.diamond += 20;
+                showNotification("🏆 천만장자! +20💎");
+            }
+
+            if (!a.gold100m && gameState.totalGoldEarned >= 100000000) {
+                a.gold100m = true;
+                gameState.diamond += 50;
+                showNotification("🏆 억만장자! +50💎");
             }
 
             const totalAssets = Object.values(gameState.ownedItems).flat().length;
+
             if (!a.firstAsset && totalAssets >= 1) {
                 a.firstAsset = true;
-                showNotification("🏆 첫 자산 획득!");
+                gameState.diamond += 3;
+                showNotification("🏆 첫 자산 획득! +3💎");
             }
 
             if (!a.collector10 && totalAssets >= 10) {
                 a.collector10 = true;
-                gameState.skillPoints += 2;
-                showNotification("🏆 수집가! +2 스킬 포인트");
+                gameState.diamond += 10;
+                showNotification("🏆 수집가! +10💎");
+            }
+
+            if (!a.collector20 && totalAssets >= 20) {
+                a.collector20 = true;
+                gameState.diamond += 25;
+                showNotification("🏆 대수집가! +25💎");
             }
 
             if (!a.prestige1 && gameState.prestige >= 1) {
                 a.prestige1 = true;
-                gameState.skillPoints += 5;
-                showNotification("🏆 첫 환생! +5 스킬 포인트");
+                gameState.diamond += 30;
+                showNotification("🏆 첫 환생! +30💎");
+            }
+
+            if (!a.firstDiamond && gameState.totalDiamondEarned >= 1) {
+                a.firstDiamond = true;
+                showNotification("🏆 첫 다이아!");
+            }
+
+            if (!a.firstRelic && Object.keys(gameState.relicInventory).length >= 1) {
+                a.firstRelic = true;
+                gameState.diamond += 15;
+                showNotification("🏆 첫 유물! +15💎");
             }
 
             const totalSkills = Object.values(gameState.skills).reduce((a, b) => a + b, 0);
             if (!a.skill5 && totalSkills >= 5) {
                 a.skill5 = true;
-                showNotification("🏆 숙련자!");
+                gameState.diamond += 5;
+                showNotification("🏆 숙련자! +5💎");
             }
         }
 
         // ═══════════════════════════════════════════════════════════
-        // 🎨 렌더링 시스템
+        // 렌더링 시스템
         // ═══════════════════════════════════════════════════════════
 
-        // 유틸리티
         function formatGold(num) {
+            if (num >= 1e18) return (num / 1e18).toFixed(2) + "E";
             if (num >= 1e15) return (num / 1e15).toFixed(2) + "P";
             if (num >= 1e12) return (num / 1e12).toFixed(2) + "T";
             if (num >= 1e9) return (num / 1e9).toFixed(2) + "B";
             if (num >= 1e6) return (num / 1e6).toFixed(2) + "M";
             if (num >= 1e3) return (num / 1e3).toFixed(2) + "K";
-            return num.toLocaleString();
+            return Math.floor(num).toLocaleString();
         }
 
         function drawRoundRect(x, y, w, h, r, fill, stroke = null) {
-            ctx.beginPath();
-            ctx.moveTo(x + r, y);
-            ctx.lineTo(x + w - r, y);
-            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-            ctx.lineTo(x + w, y + h - r);
-            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-            ctx.lineTo(x + r, y + h);
-            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-            ctx.lineTo(x, y + r);
-            ctx.quadraticCurveTo(x, y, x + r, y);
-            ctx.closePath();
-
-            if (fill) {
-                ctx.fillStyle = fill;
-                ctx.fill();
-            }
-            if (stroke) {
-                ctx.strokeStyle = stroke;
-                ctx.lineWidth = 2;
-                ctx.stroke();
-            }
+            ctx.beginPath(); ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+            ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h); ctx.lineTo(x + r, y + h);
+            ctx.quadraticCurveTo(x, y + h, x, y + h - r); ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+            if (fill) { ctx.fillStyle = fill; ctx.fill(); } if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 2; ctx.stroke(); }
         }
 
         function drawGlow(x, y, w, h, r, color, alpha = 0.3) {
             ctx.shadowColor = color;
-            ctx.shadowBlur = 15;
+            ctx.shadowBlur = 20;
             ctx.shadowOffsetX = 0;
             ctx.shadowOffsetY = 0;
             drawRoundRect(x, y, w, h, r, `rgba(0,0,0,${alpha})`);
             ctx.shadowBlur = 0;
         }
 
-        function drawCard(x, y, w, h, color = '#1e293b') {
-            // 그림자
-            ctx.fillStyle = 'rgba(0,0,0,0.3)';
-            drawRoundRect(x + 2, y + 4, w, h, 12);
+        function drawCard(x, y, w, h, color = '#1a1f35') {
+            // 좌표 정수화
+            x = Math.round(x);
+            y = Math.round(y);
+            w = Math.round(w);
+            h = Math.round(h);
 
-            // 카드 본체
-            drawRoundRect(x, y, w, h, 12, color);
+            ctx.save();
 
-            // 테두리 하이라이트
-            ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+            // 배경 그라디언트
+            const gradient = ctx.createLinearGradient(x, y, x, y + h);
+            gradient.addColorStop(0, color);
+            gradient.addColorStop(1, shadeColor(color, -20));
+
+            // 그림자 설정
+            ctx.shadowColor = 'rgba(79, 70, 229, 0.3)';
+            ctx.shadowBlur = 12;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 4;
+
+            // 배경 그리기
+            ctx.fillStyle = gradient;
+            drawRoundRect(x, y, w, h, 14, gradient);
+
+            // 그림자 제거 (테두리에는 그림자 적용 안 함)
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetY = 0;
+
+            // 테두리 (0.5px 오프셋으로 선명하게)
             ctx.lineWidth = 1;
-            drawRoundRect(x, y, w, h, 12, null, 'rgba(255,255,255,0.1)');
+            ctx.strokeStyle = 'rgba(99, 102, 241, 0.4)';
+
+            drawRoundRect(
+                x + 0.5,
+                y + 0.5,
+                w - 1,
+                h - 1,
+                13,
+                null,
+                ctx.strokeStyle
+            );
+
+            ctx.restore();
+        }
+
+        function shadeColor(color, percent) {
+            const num = parseInt(color.replace("#", ""), 16);
+            const amt = Math.round(2.55 * percent);
+            const R = Math.min(255, Math.max(0, (num >> 16) + amt));
+            const G = Math.min(255, Math.max(0, (num >> 8 & 0x00FF) + amt));
+            const B = Math.min(255, Math.max(0, (num & 0x0000FF) + amt));
+            return "#" + (0x1000000 + (R << 16) + (G << 8) + B).toString(16).slice(1);
         }
 
         function drawProgressBar(x, y, w, h, progress, color) {
             // 배경
-            drawRoundRect(x, y, w, h, h / 2, '#0f172a');
+            drawRoundRect(x, y, w, h, h / 2, 'rgba(15, 23, 42, 0.8)');
 
             // 진행도
             const fillW = Math.max(h, w * progress);
-            drawRoundRect(x, y, fillW, h, h / 2, color);
+
+            const gradient = ctx.createLinearGradient(x, y, x + fillW, y);
+            gradient.addColorStop(0, color);
+            gradient.addColorStop(1, shadeColor(color, 30));
+
+            drawRoundRect(x, y, fillW, h, h / 2, gradient);
 
             // 글로우
             if (progress > 0) {
                 ctx.shadowColor = color;
-                ctx.shadowBlur = 10;
-                drawRoundRect(x, y, fillW, h, h / 2, color);
+                ctx.shadowBlur = 15;
+                drawRoundRect(x, y, fillW, h, h / 2, 'transparent');
                 ctx.shadowBlur = 0;
             }
         }
 
-        // 메인 렌더
         function render() {
-            // 화면 흔들림
             ctx.save();
             if (shakeAmount > 0) {
                 ctx.translate(
@@ -704,17 +891,28 @@
                 shakeAmount *= 0.9;
             }
 
-            // 배경
+            // 배경 그라디언트
             const gradient = ctx.createLinearGradient(0, 0, 0, 640);
-            gradient.addColorStop(0, '#1e293b');
-            gradient.addColorStop(1, '#0f172a');
+            gradient.addColorStop(0, '#1a1f35');
+            gradient.addColorStop(0.5, '#0f172a');
+            gradient.addColorStop(1, '#0a0e1a');
             ctx.fillStyle = gradient;
             ctx.fillRect(0, 0, 360, 640);
 
-            // 상단 골드 표시
+            // 배경 패턴
+            ctx.globalAlpha = 0.03;
+            for (let i = 0; i < 5; i++) {
+                ctx.beginPath();
+                ctx.arc(Math.sin(frameCount * 0.01 + i) * 180 + 180,
+                    Math.cos(frameCount * 0.008 + i) * 320 + 320,
+                    100, 0, Math.PI * 2);
+                ctx.fillStyle = '#4f46e5';
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+
             drawTopBar();
 
-            // 탭별 컨텐츠
             clickBoxes = [];
             const tab = gameState.currentTab;
 
@@ -723,70 +921,114 @@
             else if (tab === '스킬') renderSkills();
             else if (tab === '자산') renderAssets();
             else if (tab === '환생') renderPrestige();
+            else if (tab === '상점') renderShop();
+            else if (tab === '유물') renderRelics();
             else if (Assets[tab]) renderStore(tab);
 
-            // 하단 탭바
             drawTabBar();
-
-            // 파티클
             renderParticles();
 
-            // 알림
             if (gameState.notification) {
                 drawNotification();
             }
 
             ctx.restore();
         }
-
         function drawTopBar() {
-            // 카드
-            drawCard(10, 10, 340, 100, '#1e293b');
+            // 메인 카드
+            drawCard(10, 10, 340, 110, '#1a1f35');
 
-            // 골드 (펄스 효과)
-            const pulse = 1 + goldPulse * 0.1;
-            goldPulse *= 0.9;
+            // 골드 - 위치 조정
+            const pulse = 1 + goldPulse * 0.15;
+            goldPulse *= 0.85;
 
             ctx.save();
-            ctx.translate(180, 45);
+            ctx.translate(45, 35);  // 100 → 30으로 변경
             ctx.scale(pulse, pulse);
-            ctx.fillStyle = '#fbbf24';
-            ctx.font = 'bold 28px Noto Sans KR';
+
+            ctx.fillStyle = 'rgba(251, 191, 36, 0.2)';
+            ctx.beginPath();
+            ctx.arc(0, 0, 18, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.font = '20px sans-serif';
             ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(formatGold(gameState.gold) + ' G', 0, 0);
+            ctx.fillText('💰', 0, 7);
+
+            ctx.fillStyle = '#fbbf24';
+            ctx.font = 'bold 18px Noto Sans KR';  // 20 → 18로 축소
+            ctx.textAlign = 'left';
+            ctx.fillText(formatGold(gameState.gold), 25, 5);
             ctx.restore();
 
-            // 수익 정보
-            ctx.fillStyle = '#94a3b8';
-            ctx.font = '11px Noto Sans KR';
-            ctx.textAlign = 'center';
-            ctx.fillText(`터치: +${formatGold(getClickPower())} | 자동: +${formatGold(getAutoIncome())}/s`, 180, 75);
+            // 다이아 - 위치 조정
+            const dpulse = 1 + diamondPulse * 0.15;
+            diamondPulse *= 0.85;
 
-            // 환생 정보
+            ctx.save();
+            ctx.translate(260, 35);  // 260 → 200으로 변경
+            ctx.scale(dpulse, dpulse);
+
+            ctx.fillStyle = 'rgba(168, 85, 247, 0.2)';
+            ctx.beginPath();
+            ctx.arc(0, 0, 16, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.font = '18px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('💎', 0, 6);
+
+            ctx.fillStyle = '#a855f7';
+            ctx.font = 'bold 16px Noto Sans KR';  // 18 → 16으로 축소
+            ctx.textAlign = 'left';
+            ctx.fillText(gameState.diamond.toLocaleString(), 22, 5);
+            ctx.restore();
+
+            // 수익 정보 - 2줄로 정리
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '11px Noto Sans KR';  // 10 → 11로 약간 확대
+            ctx.textAlign = 'left';
+            ctx.fillText(`터치: +${formatGold(getClickPower())}`, 30, 72);
+            ctx.fillText(`자동: +${formatGold(getAutoIncome())}/s`, 30, 87);
+
+            ctx.textAlign = 'right';
+            ctx.fillText(`크리: ${(getCritChance() * 100).toFixed(1)}%`, 330, 72);
+            ctx.fillText(`×${getCritDamage().toFixed(1)}배`, 330, 87);
+
+            // 환생 정보는 하단으로 이동
             if (gameState.prestige > 0) {
                 ctx.fillStyle = '#fbbf24';
-                ctx.font = 'bold 10px Noto Sans KR';
-                ctx.fillText(`⭐ 환생 ${gameState.prestige} (x${gameState.prestigeBonus.toFixed(1)})`, 180, 95);
+                ctx.font = 'bold 11px Noto Sans KR';
+                ctx.textAlign = 'right';
+                ctx.fillText(`⭐ Lv.${gameState.prestige} (×${gameState.prestigeBonus.toFixed(1)})`, 330, 105);
             }
 
-            // 이벤트 표시
+            // 활성 물약 표시 위치 조정
+            if (activePotions.length > 0) {
+                ctx.fillStyle = '#10b981';
+                ctx.font = 'bold 10px Noto Sans KR';
+                ctx.textAlign = 'left';
+                let potionText = activePotions.map(p =>
+                    `${p.type === 'click' ? '⚡' : '🤖'}×${p.multiplier}`
+                ).join(' ');
+                ctx.fillText(potionText, 30, 105);
+            }
+
+            // 이벤트
             if (gameState.currentEvent) {
                 const timeLeft = Math.ceil(gameState.eventTimer / 60);
-                drawRoundRect(10, 120, 340, 25, 12, gameState.currentEvent.color);
+                drawCard(10, 130, 340, 30, gameState.currentEvent.color);
                 ctx.fillStyle = '#fff';
-                ctx.font = 'bold 12px Noto Sans KR';
+                ctx.font = 'bold 13px Noto Sans KR';
                 ctx.textAlign = 'center';
-                ctx.fillText(`${gameState.currentEvent.name} (${timeLeft}초)`, 180, 135);
+                ctx.fillText(`${gameState.currentEvent.name} (${timeLeft}초)`, 180, 150);
             }
         }
-
         function renderBegging() {
-            const startY = gameState.currentEvent ? 160 : 145;
+            const startY = gameState.currentEvent ? 170 : 155;
 
-            // 헤더
             ctx.fillStyle = '#f1f5f9';
-            ctx.font = 'bold 20px Noto Sans KR';
+            ctx.font = 'bold 22px Noto Sans KR';
             ctx.textAlign = 'center';
             ctx.fillText('💰 구걸 마당', 180, startY);
 
@@ -794,55 +1036,63 @@
             ctx.font = '12px Noto Sans KR';
             ctx.fillText('화면을 터치해서 돈을 모으세요!', 180, startY + 25);
 
-            // 클릭 영역 (캐릭터)
-            const charY = startY + 60;
-            const charSize = 120;
+            const charY = startY + 55;
+            const charSize = 130;
 
-            // 캐릭터 카드
-            drawCard(120, charY, charSize, charSize, '#334155');
+            // 캐릭터 카드 - 프리미엄 스타일
+            const gradient = ctx.createRadialGradient(180, charY + charSize / 2, 0, 180, charY + charSize / 2, charSize);
+            gradient.addColorStop(0, 'rgba(99, 102, 241, 0.3)');
+            gradient.addColorStop(1, 'rgba(99, 102, 241, 0.05)');
 
-            // 간단한 캐릭터 (이모지)
+            drawCard(115, charY, charSize, charSize, '#242b45');
+
+            ctx.fillStyle = gradient;
+            ctx.fillRect(115, charY, charSize, charSize);
+
             ctx.font = `${charSize - 20}px sans-serif`;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText('🧙', 180, charY + charSize / 2);
 
-            // 크리티컬 확률 표시
-            const critChance = (getCritChance() * 100).toFixed(1);
-            drawCard(20, charY + charSize + 20, 320, 50, '#1e293b');
-            ctx.fillStyle = '#ef4444';
+            // 통계 카드
+            drawCard(20, charY + charSize + 20, 320, 120, '#1a1f35');
+
+            ctx.fillStyle = '#94a3b8';
             ctx.font = 'bold 14px Noto Sans KR';
             ctx.textAlign = 'left';
-            ctx.fillText(`🎯 크리티컬 확률: ${critChance}%`, 40, charY + charSize + 45);
-
-            // 통계
-            drawCard(20, charY + charSize + 85, 320, 100, '#1e293b');
-            ctx.fillStyle = '#94a3b8';
-            ctx.font = '12px Noto Sans KR';
-            ctx.textAlign = 'left';
-            ctx.fillText('📊 통계', 40, charY + charSize + 110);
+            ctx.fillText('📊 실시간 통계', 40, charY + charSize + 45);
 
             const stats = [
-                `총 획득: ${formatGold(gameState.totalGoldEarned)} G`,
-                `자산: ${Object.values(gameState.ownedItems).flat().length}개`,
-                `스킬 포인트: ${gameState.skillPoints}개`
+                { icon: '💰', label: '총 획득', value: formatGold(gameState.totalGoldEarned) + ' G' },
+                { icon: '💎', label: '다이아', value: gameState.totalDiamondEarned.toLocaleString() },
+                { icon: '📦', label: '자산', value: Object.values(gameState.ownedItems).flat().length + '개' },
+                { icon: '⭐', label: '환생', value: gameState.prestige + '회' } // 스킬포인트 → 환생 횟수
             ];
 
             stats.forEach((stat, i) => {
+                const sx = 40 + (i % 2) * 160;
+                const sy = charY + charSize + 70 + Math.floor(i / 2) * 30;
+
+                ctx.font = '16px sans-serif';
+                ctx.fillText(stat.icon, sx, sy);
+
+                ctx.fillStyle = '#94a3b8';
+                ctx.font = '10px Noto Sans KR';
+                ctx.fillText(stat.label, sx + 25, sy);
+
                 ctx.fillStyle = '#f1f5f9';
-                ctx.font = '11px Noto Sans KR';
-                ctx.fillText(stat, 50, charY + charSize + 135 + i * 18);
+                ctx.font = 'bold 11px Noto Sans KR';
+                ctx.fillText(stat.value, sx + 25, sy + 14);
             });
 
-            // 클릭 박스
             clickBoxes.push({ type: 'begging', x: 0, y: 0, w: 360, h: 580 });
         }
 
         function renderUpgrade() {
-            const startY = gameState.currentEvent ? 160 : 145;
+            const startY = gameState.currentEvent ? 170 : 155;
 
             ctx.fillStyle = '#f1f5f9';
-            ctx.font = 'bold 20px Noto Sans KR';
+            ctx.font = 'bold 22px Noto Sans KR';
             ctx.textAlign = 'center';
             ctx.fillText('⚡ 능력 강화', 180, startY);
 
@@ -852,11 +1102,9 @@
 
             let y = startY + 50;
 
-            // 클릭 강화
             drawUpgradeSection('click', '👆 터치 강화', gameState.clickLevel, y);
             y += 140;
 
-            // 자동 강화
             drawUpgradeSection('auto', '🤖 자동 알바', gameState.autoLevel, y);
         }
 
@@ -864,136 +1112,391 @@
             const cost1 = getUpgradeCost(type, level);
             const canBuy1 = gameState.gold >= cost1;
 
-            // 메인 버튼
             const pulse = buttonPulses.get(type + '1') || 0;
             if (pulse > 0) {
-                drawGlow(20, y, 320, 60, 12, '#3b82f6', pulse);
-                buttonPulses.set(type + '1', pulse * 0.9);
+                drawGlow(20, y, 320, 70, 14, '#4f46e5', pulse);
+                buttonPulses.set(type + '1', pulse * 0.85);
             }
 
-            drawCard(20, y, 320, 60, canBuy1 ? '#3b82f6' : '#334155');
+            const btnColor = canBuy1 ? '#4f46e5' : '#334155';
+            drawCard(20, y, 320, 70, btnColor);
 
             ctx.fillStyle = '#fff';
-            ctx.font = 'bold 16px Noto Sans KR';
+            ctx.font = 'bold 18px Noto Sans KR';
             ctx.textAlign = 'left';
-            ctx.fillText(`${title} Lv.${level}`, 40, y + 25);
+            ctx.fillText(`${title} Lv.${level}`, 40, y + 28);
 
-            ctx.font = '13px Noto Sans KR';
+            ctx.font = '14px Noto Sans KR';
             ctx.fillStyle = canBuy1 ? '#fbbf24' : '#64748b';
-            ctx.fillText(`비용: ${formatGold(cost1)} G`, 40, y + 48);
+            ctx.fillText(`비용: ${formatGold(cost1)} G`, 40, y + 52);
 
-            clickBoxes.push({ type: 'upgrade', subtype: type, count: 1, x: 20, y, w: 320, h: 60 });
+            // 레벨 표시
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.font = 'bold 14px Noto Sans KR';
+            ctx.textAlign = 'right';
+            ctx.fillText(`+${type === 'click' ? formatGold(getClickPower()) : formatGold(getAutoIncome())}`, 320, y + 40);
 
-            // 다중 구매 버튼
+            clickBoxes.push({ type: 'upgrade', subtype: type, count: 1, x: 20, y, w: 320, h: 70 });
+
             const multiCounts = [10, 100];
             multiCounts.forEach((count, i) => {
                 const cost = getMultiUpgradeCost(type, level, count);
                 const canBuy = gameState.gold >= cost;
                 const bx = 20 + i * 165;
-                const by = y + 70;
+                const by = y + 80;
 
                 const pulseMult = buttonPulses.get(type + count) || 0;
                 if (pulseMult > 0) {
-                    drawGlow(bx, by, 155, 40, 10, '#10b981', pulseMult);
-                    buttonPulses.set(type + count, pulseMult * 0.9);
+                    drawGlow(bx, by, 155, 45, 12, '#10b981', pulseMult);
+                    buttonPulses.set(type + count, pulseMult * 0.85);
                 }
 
-                drawCard(bx, by, 155, 40, canBuy ? '#10b981' : '#1e293b');
+                drawCard(bx, by, 155, 45, canBuy ? '#10b981' : '#1a1f35');
 
                 ctx.fillStyle = '#fff';
-                ctx.font = 'bold 12px Noto Sans KR';
+                ctx.font = 'bold 13px Noto Sans KR';
                 ctx.textAlign = 'center';
-                ctx.fillText(`+${count}개`, bx + 77, by + 15);
+                ctx.fillText(`+${count}개`, bx + 77, by + 18);
 
-                ctx.font = '10px Noto Sans KR';
+                ctx.font = '11px Noto Sans KR';
                 ctx.fillStyle = canBuy ? '#fbbf24' : '#64748b';
-                ctx.fillText(formatGold(cost) + ' G', bx + 77, by + 30);
+                ctx.fillText(formatGold(cost) + ' G', bx + 77, by + 35);
 
-                clickBoxes.push({ type: 'upgrade', subtype: type, count, x: bx, y: by, w: 155, h: 40 });
+                clickBoxes.push({ type: 'upgrade', subtype: type, count, x: bx, y: by, w: 155, h: 45 });
             });
         }
 
-        function renderSkills() {
-            const startY = gameState.currentEvent ? 160 : 145;
+        function renderShop() {
+            const startY = gameState.currentEvent ? 170 : 155;
 
             ctx.fillStyle = '#f1f5f9';
-            ctx.font = 'bold 20px Noto Sans KR';
+            ctx.font = 'bold 22px Noto Sans KR';
             ctx.textAlign = 'center';
-            ctx.fillText('🎯 스킬 트리', 180, startY);
-
-            ctx.fillStyle = '#fbbf24';
-            ctx.font = 'bold 14px Noto Sans KR';
-            ctx.fillText(`사용 가능: ${gameState.skillPoints} 포인트`, 180, startY + 25);
+            ctx.fillText('🏪 프리미엄 상점', 180, startY);
 
             ctx.fillStyle = '#94a3b8';
             ctx.font = '11px Noto Sans KR';
-            ctx.fillText('자산 10개마다 +1 포인트', 180, startY + 45);
+            ctx.fillText('특별한 아이템으로 더 빠른 성장을!', 180, startY + 25);
 
-            const skills = [
-                { id: 'clickPower', icon: '👆', name: '클릭 파워', desc: '+15%' },
-                { id: 'autoSpeed', icon: '🤖', name: '자동 속도', desc: '+20%' },
-                { id: 'critBoost', icon: '🎯', name: '크리티컬', desc: '+5%' },
-                { id: 'goldBonus', icon: '💰', name: '골드 보너스', desc: '+10%' },
-                { id: 'assetBoost', icon: '📈', name: '자산 효율', desc: '+12%' }
+            // 전체 콘텐츠 높이 계산
+            const potions = ['clickPotion5', 'clickPotion10', 'clickPotion100', 'autoPotion5', 'autoPotion10', 'autoPotion100'];
+            const itemHeight = 65; // 각 아이템 높이
+            const totalItems = potions.length + 2; // 물약 6개 + 구분선 + 오토클리커
+            const contentHeight = totalItems * itemHeight + 50;
+            const viewHeight = 640 - (startY + 40) - 80;
+
+            const maxScroll = Math.max(0, contentHeight - viewHeight);
+            gameState.scrollOffset = Math.min(gameState.scrollOffset, maxScroll);
+
+            let y = startY + 50 - gameState.scrollOffset; // 스크롤 적용
+
+            // 물약 섹션 헤더
+            ctx.fillStyle = '#f1f5f9';
+            ctx.font = 'bold 15px Noto Sans KR';
+            ctx.textAlign = 'left';
+            ctx.fillText('⚗️ 강화 물약 (30초 지속)', 30, y);
+            y += 25;
+
+            // 물약 아이템들
+            potions.forEach(key => {
+                const item = ShopItems[key];
+                const canBuy = gameState.gold >= item.price;
+
+                if (y > startY - 65 && y < 560) { // 화면에 보일 때만 렌더링
+                    drawCard(20, y, 320, 55, canBuy ? '#10b981' : '#1a1f35');
+
+                    ctx.fillStyle = '#fff';
+                    ctx.font = 'bold 13px Noto Sans KR';
+                    ctx.textAlign = 'left';
+                    ctx.fillText(item.name, 35, y + 22);
+
+                    ctx.fillStyle = '#94a3b8';
+                    ctx.font = '10px Noto Sans KR';
+                    ctx.fillText(`${item.type === 'click' ? '터치' : '자동'} ×${item.multiplier} (30초)`, 35, y + 38);
+
+                    ctx.fillStyle = canBuy ? '#fbbf24' : '#64748b';
+                    ctx.font = 'bold 12px Noto Sans KR';
+                    ctx.textAlign = 'right';
+                    ctx.fillText(formatGold(item.price) + ' G', 320, y + 32);
+
+                    // 클릭 박스 좌표도 스크롤 반영된 y값 사용
+                    clickBoxes.push({ type: 'shop', item: key, x: 20, y, w: 320, h: 55 });
+                }
+                y += 65;
+            });
+
+            // 영구 아이템 섹션
+            y += 10;
+
+            if (y > startY - 65 && y < 560) {
+                ctx.fillStyle = '#f1f5f9';
+                ctx.font = 'bold 15px Noto Sans KR';
+                ctx.textAlign = 'left';
+                ctx.fillText('🔮 영구 아이템', 30, y);
+            }
+            y += 25;
+
+            const autoItem = ShopItems.autoClicker;
+            const hasAuto = gameState.shopItems.autoClicker;
+            const canBuyAuto = !hasAuto && gameState.gold >= autoItem.price && gameState.prestige >= autoItem.requirePrestige;
+            const autoColor = hasAuto ? '#334155' : (canBuyAuto ? '#a855f7' : '#1a1f35');
+
+            if (y > startY - 65 && y < 560) {
+                drawCard(20, y, 320, 65, autoColor);
+
+                ctx.fillStyle = hasAuto ? '#64748b' : '#fff';
+                ctx.font = 'bold 14px Noto Sans KR';
+                ctx.textAlign = 'left';
+                ctx.fillText(autoItem.name, 35, y + 25);
+
+                ctx.fillStyle = hasAuto ? '#475569' : '#94a3b8';
+                ctx.font = '11px Noto Sans KR';
+                ctx.fillText('자동으로 클릭해줍니다', 35, y + 42);
+
+                if (hasAuto) {
+                    ctx.fillStyle = '#10b981';
+                    ctx.font = 'bold 12px Noto Sans KR';
+                    ctx.textAlign = 'right';
+                    ctx.fillText('✓ 보유중', 320, y + 35);
+                } else {
+                    if (gameState.prestige < autoItem.requirePrestige) {
+                        ctx.fillStyle = '#ef4444';
+                        ctx.font = '10px Noto Sans KR';
+                        ctx.textAlign = 'right';
+                        ctx.fillText(`환생 ${autoItem.requirePrestige} 필요`, 320, y + 28);
+                    }
+                    ctx.fillStyle = canBuyAuto ? '#fbbf24' : '#64748b';
+                    ctx.font = 'bold 12px Noto Sans KR';
+                    ctx.fillText(formatGold(autoItem.price) + ' G', 320, y + 45);
+                }
+
+                if (!hasAuto) {
+                    clickBoxes.push({ type: 'shop', item: 'autoClicker', x: 20, y, w: 320, h: 65 });
+                }
+            }
+        }
+
+        function renderRelics() {
+            const startY = gameState.currentEvent ? 170 : 155;
+
+            ctx.fillStyle = '#f1f5f9';
+            ctx.font = 'bold 22px Noto Sans KR';
+            ctx.textAlign = 'center';
+            ctx.fillText('🎰 유물 뽑기', 180, startY);
+
+            ctx.fillStyle = '#a855f7';
+            ctx.font = 'bold 15px Noto Sans KR';
+            ctx.fillText(`보유 다이아: ${gameState.diamond.toLocaleString()} 💎`, 180, startY + 25);
+
+            // 뽑기 버튼
+            const canPull = gameState.diamond >= 10;
+            drawCard(80, startY + 45, 200, 60, canPull ? '#a855f7' : '#334155');
+
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 18px Noto Sans KR';
+            ctx.textAlign = 'center';
+            ctx.fillText('유물 뽑기', 180, startY + 73);
+
+            ctx.fillStyle = canPull ? '#fbbf24' : '#64748b';
+            ctx.font = '13px Noto Sans KR';
+            ctx.fillText('10 💎', 180, startY + 93);
+
+            clickBoxes.push({ type: 'relic_pull', x: 80, y: startY + 45, w: 200, h: 60 });
+
+            // 확률 정보
+            let y = startY + 120;
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '10px Noto Sans KR';
+            ctx.textAlign = 'left';
+            ctx.fillText('드랍 확률: 일반 0.1%, 크리티컬 1%', 30, y);
+            y += 20;
+
+            // 등급별 확률
+            const rarityInfo = [
+                { rarity: 'legendary', name: '전설', color: '#fbbf24', rate: '1%' },
+                { rarity: 'epic', name: '영웅', color: '#a855f7', rate: '9%' },
+                { rarity: 'rare', name: '희귀', color: '#3b82f6', rate: '25%' },
+                { rarity: 'common', name: '일반', color: '#94a3b8', rate: '65%' }
             ];
 
-            // 👇 핵심
-            const viewStart = startY + 70;
-            const contentHeight = skills.length * 85;
+            rarityInfo.forEach(info => {
+                ctx.fillStyle = info.color;
+                ctx.fillText(`■ ${info.name} ${info.rate}`, 30, y);
+                y += 18;
+            });
+
+            // 보유 유물
+            y += 10;
+            ctx.fillStyle = '#f1f5f9';
+            ctx.font = 'bold 14px Noto Sans KR';
+            ctx.textAlign = 'left';
+            ctx.fillText('📦 보유 유물', 30, y);
+            y += 25;
+
+            const viewHeight = 640 - y - 80;
+            const contentHeight = Object.keys(gameState.relicInventory).length * 70;
+            const maxScroll = Math.max(0, contentHeight - viewHeight);
+            gameState.scrollOffset = Math.min(gameState.scrollOffset, maxScroll);
+
+            const scrollY = y - gameState.scrollOffset;
+            let cy = scrollY;
+
+            if (Object.keys(gameState.relicInventory).length === 0) {
+                ctx.fillStyle = '#64748b';
+                ctx.font = '12px Noto Sans KR';
+                ctx.textAlign = 'center';
+                ctx.fillText('아직 보유한 유물이 없습니다', 180, cy + 30);
+            } else {
+                Object.entries(gameState.relicInventory).forEach(([relicId, count]) => {
+                    const relic = Relics.find(r => r.id === relicId);
+                    if (!relic) return;
+
+                    if (cy > y - 70 && cy < 640 - 80) {
+                        const color = RarityColors[relic.rarity];
+                        drawCard(20, cy, 320, 60, '#1a1f35');
+
+                        // 등급 테두리
+                        ctx.strokeStyle = color;
+                        ctx.lineWidth = 2;
+                        drawRoundRect(20, cy, 320, 60, 14, null, color);
+
+                        ctx.fillStyle = color;
+                        ctx.font = 'bold 13px Noto Sans KR';
+                        ctx.textAlign = 'left';
+                        ctx.fillText(relic.name, 35, cy + 22);
+
+                        ctx.fillStyle = '#94a3b8';
+                        ctx.font = '10px Noto Sans KR';
+                        ctx.fillText(relic.desc, 35, cy + 38);
+
+                        ctx.fillStyle = '#fbbf24';
+                        ctx.font = 'bold 11px Noto Sans KR';
+                        ctx.textAlign = 'right';
+                        ctx.fillText(`×${count}`, 320, cy + 30);
+                    }
+
+                    cy += 70;
+                });
+            }
+        }
+
+        function renderSkills() {
+            const startY = gameState.currentEvent ? 170 : 155;
+
+            ctx.fillStyle = '#f1f5f9';
+            ctx.font = 'bold 22px Noto Sans KR';
+            ctx.textAlign = 'center';
+            ctx.fillText('🎯 스킬 트리', 180, startY);
+
+            ctx.fillStyle = '#a855f7';
+            ctx.font = 'bold 15px Noto Sans KR';
+            ctx.fillText(`보유 다이아: ${gameState.diamond.toLocaleString()} 💎`, 180, startY + 25);
+
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '10px Noto Sans KR';
+            ctx.fillText('다이아로 스킬을 강화하세요 (최대 Lv.100)', 180, startY + 45);
+
+            const skills = [
+                { id: 'clickPower', icon: '👆', name: '클릭 파워', value: gameState.skills.clickPower * 10, unit: '%' },
+                { id: 'autoSpeed', icon: '🤖', name: '자동 속도', value: gameState.skills.autoSpeed * 15, unit: '%' },
+                { id: 'critChance', icon: '🎲', name: '크리티컬 확률', value: gameState.skills.critChance * 2, unit: '%' },
+                { id: 'critDamage', icon: '💥', name: '크리티컬 데미지', value: gameState.skills.critDamage * 0.5, unit: '배' },
+                { id: 'goldBonus', icon: '💰', name: '골드 보너스', value: gameState.skills.goldBonus * 8, unit: '%' },
+                { id: 'assetBoost', icon: '📈', name: '자산 효율', value: gameState.skills.assetBoost * 12, unit: '%' }
+            ];
+
+            const viewStart = startY + 65;
+            const itemHeight = 85;
+            const contentHeight = skills.length * itemHeight;
             const viewHeight = 640 - viewStart - 80;
 
             const maxScroll = Math.max(0, contentHeight - viewHeight);
             gameState.scrollOffset = Math.min(gameState.scrollOffset, maxScroll);
 
-            let y = viewStart - gameState.scrollOffset;
+            let y = Math.round(viewStart - gameState.scrollOffset);
 
             skills.forEach(skill => {
                 const level = gameState.skills[skill.id];
-                const maxLevel = 10;
-                const canUpgrade = gameState.skillPoints > 0 && level < maxLevel;
+                const maxLevel = 100;
+                const cost = getSkillCost(skill.id);
+                const canUpgrade = gameState.diamond >= cost && level < maxLevel;
 
-                // 👇 화면 안에 있을 때만 그림
-                if (y > viewStart - 80 && y < 640) {
+                if (y > viewStart - itemHeight && y < viewStart + viewHeight) {
+                    // 배경 카드
+                    drawCard(20, y, 320, 75, '#1a1f35');
 
-                    drawCard(20, y, 320, 70, '#1e293b');
-
-                    ctx.font = '32px sans-serif';
+                    // 아이콘
+                    ctx.font = '28px sans-serif';
                     ctx.textAlign = 'center';
-                    ctx.fillText(skill.icon, 50, y + 45);
+                    ctx.fillText(skill.icon, 45, y + 42);
 
+                    // 스킬명
                     ctx.fillStyle = '#f1f5f9';
                     ctx.font = 'bold 14px Noto Sans KR';
                     ctx.textAlign = 'left';
-                    ctx.fillText(skill.name, 80, y + 25);
+                    ctx.fillText(`${skill.name} (Lv.${level}/${maxLevel})`, 75, y + 25);
 
-                    ctx.fillStyle = '#94a3b8';
+                    // 현재 효과
+                    ctx.fillStyle = '#10b981';
                     ctx.font = '11px Noto Sans KR';
-                    ctx.fillText(skill.desc, 80, y + 45);
+                    ctx.fillText(`현재: +${skill.value.toFixed(1)}${skill.unit}`, 75, y + 45);
 
-                    ctx.fillStyle = '#fbbf24';
-                    ctx.font = 'bold 12px Noto Sans KR';
-                    ctx.textAlign = 'right';
-                    ctx.fillText(`Lv.${level}/${maxLevel}`, 320, y + 25);
 
-                    drawProgressBar(80, y + 52, 240, 8, level / maxLevel, '#3b82f6');
+                    // 진행바
+                    drawProgressBar(75, y + 55, 150, 6, level / maxLevel, '#4f46e5');
 
-                    if (canUpgrade) {
-                        drawCard(250, y + 15, 70, 30, '#10b981');
-                        ctx.fillStyle = '#fff';
-                        ctx.font = 'bold 11px Noto Sans KR';
+                    // 강화 버튼 영역
+                    const btnX = 260;
+                    const btnY = y + 15;
+                    const btnW = 65;
+                    const btnH = 45;
+
+                    if (level < maxLevel) {
+                        const btnColor = canUpgrade ? '#a855f7' : '#334155';
+
+                        // 버튼 배경
+                        drawCard(btnX, btnY, btnW, btnH, btnColor);
+
+                        // 버튼 텍스트 - "강화" (한 번만!)
+                        ctx.fillStyle = '#ffffff';
+                        ctx.font = 'bold 12px Noto Sans KR';
                         ctx.textAlign = 'center';
-                        ctx.fillText('강화', 285, y + 33);
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText('강화', btnX + btnW / 2, btnY + btnH / 2 - 4);
 
-                        clickBoxes.push({ type: 'skill', skill: skill.id, x: 250, y: y + 15, w: 70, h: 30 });
+                        // 비용 텍스트
+                        ctx.fillStyle = canUpgrade ? '#fbbf24' : '#64748b';
+                        ctx.font = '10px Noto Sans KR';
+                        ctx.fillText(`${cost}💎`, btnX + btnW / 2, btnY + btnH / 2 + 12);
+
+                        clickBoxes.push({ type: 'skill', skill: skill.id, x: btnX, y: btnY, w: btnW, h: btnH });
+                    } else {
+                        // MAX 버튼
+                        drawCard(btnX, btnY, btnW, btnH, '#334155');
+
+                        ctx.fillStyle = '#10b981';
+                        ctx.font = 'bold 12px Noto Sans KR';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText('MAX', btnX + btnW / 2, btnY + btnH / 2);
                     }
                 }
 
-                y += 85;
+                y += itemHeight;
             });
+
+            // 스크롤바
+            if (contentHeight > viewHeight) {
+                const scrollBarHeight = Math.max(30, (viewHeight / contentHeight) * viewHeight);
+                const scrollBarY = viewStart + (gameState.scrollOffset / maxScroll) * (viewHeight - scrollBarHeight);
+
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+                ctx.fillRect(350, scrollBarY, 4, scrollBarHeight);
+            }
         }
 
         function renderStore(category) {
-            const startY = gameState.currentEvent ? 160 : 145;
+            const startY = gameState.currentEvent ? 170 : 155;
 
             const icons = {
                 '부동산': '🏠',
@@ -1003,204 +1506,149 @@
             };
 
             ctx.fillStyle = '#f1f5f9';
-            ctx.font = 'bold 20px Noto Sans KR';
+            ctx.font = 'bold 22px Noto Sans KR';
             ctx.textAlign = 'center';
             ctx.fillText(`${icons[category]} ${category} 상점`, 180, startY);
 
+            const owned = gameState.ownedItems[category].length;
+            const total = Assets[category].length;
             ctx.fillStyle = '#94a3b8';
             ctx.font = '11px Noto Sans KR';
-            ctx.fillText('자산 구매로 영구 능력치를 강화하세요', 180, startY + 25);
+            ctx.fillText(`보유: ${owned}/${total}개`, 180, startY + 25);
 
-            const contentHeight = Assets[category].length * 75;
-            const viewHeight = 640 - (startY + 45) - 80;
+            const contentHeight = Assets[category].length * 70;
+            const viewHeight = 640 - (startY + 40) - 80;
 
             const maxScroll = Math.max(0, contentHeight - viewHeight);
             gameState.scrollOffset = Math.min(gameState.scrollOffset, maxScroll);
 
-            const scrollY = startY + 45 - gameState.scrollOffset;
+            const scrollY = startY + 40 - gameState.scrollOffset;
             let y = scrollY;
 
             Assets[category].forEach((item, i) => {
                 const owned = gameState.ownedItems[category].includes(i);
                 const canBuy = !owned && gameState.gold >= item.p;
 
-                if (y > startY && y < 550) {
+                if (y > startY && y < 560) {
                     const pulse = buttonPulses.get(category + i) || 0;
                     if (pulse > 0) {
-                        drawGlow(20, y, 320, 65, 12, '#10b981', pulse);
-                        buttonPulses.set(category + i, pulse * 0.9);
+                        drawGlow(20, y, 320, 60, 12, '#10b981', pulse);
+                        buttonPulses.set(category + i, pulse * 0.85);
                     }
 
-                    let color = '#1e293b';
+                    let color = '#1a1f35';
                     if (owned) color = '#334155';
                     else if (canBuy) color = '#10b981';
 
-                    drawCard(20, y, 320, 65, color);
+                    drawCard(20, y, 320, 60, color);
 
-                    // 이름
                     ctx.fillStyle = owned ? '#64748b' : '#f1f5f9';
                     ctx.font = 'bold 13px Noto Sans KR';
                     ctx.textAlign = 'left';
-                    ctx.fillText(item.n, 35, y + 22);
+                    ctx.fillText(item.n, 35, y + 24);
 
-                    // 설명
                     ctx.fillStyle = owned ? '#475569' : '#94a3b8';
                     ctx.font = '11px Noto Sans KR';
-                    ctx.fillText(item.desc, 35, y + 40);
+                    ctx.fillText(item.desc, 35, y + 42);
 
-                    // 가격
                     ctx.textAlign = 'right';
                     if (owned) {
                         ctx.fillStyle = '#10b981';
-                        ctx.font = 'bold 11px Noto Sans KR';
-                        ctx.fillText('✓ 보유', 320, y + 55);
+                        ctx.font = 'bold 12px Noto Sans KR';
+                        ctx.fillText('✓ 보유', 320, y + 35);
                     } else {
                         ctx.fillStyle = canBuy ? '#fbbf24' : '#64748b';
                         ctx.font = 'bold 12px Noto Sans KR';
-                        ctx.fillText(formatGold(item.p) + ' G', 320, y + 55);
+                        ctx.fillText(formatGold(item.p) + ' G', 320, y + 35);
                     }
 
                     if (!owned) {
-                        clickBoxes.push({ type: 'asset', category, index: i, x: 20, y, w: 320, h: 65 });
+                        clickBoxes.push({ type: 'asset', category, index: i, x: 20, y, w: 320, h: 60 });
                     }
                 }
 
-                y += 75;
+                y += 70;
             });
         }
 
         function renderAssets() {
-            const startY = gameState.currentEvent ? 160 : 145;
+            const startY = gameState.currentEvent ? 170 : 155;
 
             ctx.fillStyle = '#f1f5f9';
-            ctx.font = 'bold 20px Noto Sans KR';
+            ctx.font = 'bold 22px Noto Sans KR';
             ctx.textAlign = 'center';
             ctx.fillText('📊 자산 현황', 180, startY);
 
             const total = Object.values(gameState.ownedItems).flat().length;
+            const maxTotal = Object.values(Assets).reduce((sum, arr) => sum + arr.length, 0);
             ctx.fillStyle = '#94a3b8';
             ctx.font = '12px Noto Sans KR';
-            ctx.fillText(`총 ${total}개 보유 중`, 180, startY + 25);
+            ctx.fillText(`총 ${total}/${maxTotal}개 보유 중`, 180, startY + 25);
 
-            let y = startY + 55;
+            let y = startY + 50;
 
             Object.entries(gameState.ownedItems).forEach(([cat, items]) => {
-                drawCard(20, y, 320, 70, '#1e293b');
+                drawCard(20, y, 320, 75, '#1a1f35');
 
                 const icons = { '부동산': '🏠', '미술품': '🎨', '기업': '💼', '도시': '🏙️' };
 
                 ctx.font = '32px sans-serif';
                 ctx.textAlign = 'center';
-                ctx.fillText(icons[cat], 50, y + 45);
+                ctx.fillText(icons[cat], 50, y + 48);
 
                 ctx.fillStyle = '#f1f5f9';
                 ctx.font = 'bold 16px Noto Sans KR';
                 ctx.textAlign = 'left';
-                ctx.fillText(cat, 80, y + 30);
+                ctx.fillText(cat, 80, y + 32);
 
                 ctx.fillStyle = '#94a3b8';
                 ctx.font = '12px Noto Sans KR';
-                ctx.fillText(`${items.length}개 보유`, 80, y + 50);
+                ctx.fillText(`${items.length}/${Assets[cat].length}개 보유`, 80, y + 52);
 
-                // 진행도
                 const progress = items.length / Assets[cat].length;
-                drawProgressBar(200, y + 35, 110, 10, progress, '#10b981');
+                drawProgressBar(200, y + 38, 110, 12, progress, '#10b981');
 
                 y += 85;
             });
         }
 
-        function renderPrestige() {
-            const startY = gameState.currentEvent ? 160 : 145;
-
-            ctx.fillStyle = '#f1f5f9';
-            ctx.font = 'bold 20px Noto Sans KR';
-            ctx.textAlign = 'center';
-            ctx.fillText('🌟 환생', 180, startY);
-
-            ctx.fillStyle = '#94a3b8';
-            ctx.font = '12px Noto Sans KR';
-            ctx.fillText('모든 것을 초기화하고 영구 보너스를 획득', 180, startY + 25);
-
-            // 현재 환생 정보
-            drawCard(20, startY + 50, 320, 100, '#1e293b');
-
-            ctx.fillStyle = '#fbbf24';
-            ctx.font = 'bold 18px Noto Sans KR';
-            ctx.textAlign = 'center';
-            ctx.fillText(`현재 환생: ${gameState.prestige}`, 180, startY + 85);
-
-            ctx.fillStyle = '#f1f5f9';
-            ctx.font = '14px Noto Sans KR';
-            ctx.fillText(`전체 배율: x${gameState.prestigeBonus.toFixed(1)}`, 180, startY + 110);
-
-            ctx.fillStyle = '#94a3b8';
-            ctx.font = '11px Noto Sans KR';
-            ctx.fillText(`(환생당 +${(BALANCE.prestigeBonus * 100).toFixed(0)}%)`, 180, startY + 130);
-
-            // 환생 조건
-            const canPrestige = gameState.totalGoldEarned >= BALANCE.prestigeThreshold;
-            const reward = getPrestigeReward();
-
-            drawCard(20, startY + 170, 320, 120, canPrestige ? '#10b981' : '#334155');
-
-            ctx.fillStyle = '#fff';
-            ctx.font = 'bold 16px Noto Sans KR';
-            ctx.textAlign = 'center';
-            ctx.fillText('환생 조건', 180, startY + 200);
-
-            ctx.fillStyle = canPrestige ? '#fbbf24' : '#94a3b8';
-            ctx.font = '12px Noto Sans KR';
-            ctx.fillText(`총 획득: ${formatGold(gameState.totalGoldEarned)} G`, 180, startY + 225);
-            ctx.fillText(`필요: ${formatGold(BALANCE.prestigeThreshold)} G`, 180, startY + 245);
-
-            if (canPrestige && reward > 0) {
-                ctx.fillStyle = '#fff';
-                ctx.font = 'bold 14px Noto Sans KR';
-                ctx.fillText(`보상: +${reward} 환생 레벨`, 180, startY + 270);
-
-                clickBoxes.push({ type: 'prestige', x: 20, y: startY + 170, w: 320, h: 120 });
-            }
-
-            // 안내
-            drawCard(20, startY + 310, 320, 80, '#1e293b');
-            ctx.fillStyle = '#94a3b8';
-            ctx.font = '11px Noto Sans KR';
-            ctx.textAlign = 'left';
-
-            const tips = [
-                '• 모든 골드와 자산이 초기화됩니다',
-                '• 스킬은 유지됩니다',
-                '• 영구 배율로 빠르게 성장할 수 있습니다'
-            ];
-
-            tips.forEach((tip, i) => {
-                ctx.fillText(tip, 35, startY + 340 + i * 20);
-            });
-        }
 
         function drawTabBar() {
-            const tabs = ['구걸', '강화', '스킬', '부동산', '미술품', '기업', '도시', '자산', '환생'];
-            const tabWidth = 70;
+            const tabs = ['구걸', '강화', '스킬', '부동산', '미술품', '기업', '도시', '자산', '상점', '유물', '환생'];
+            const tabWidth = 65;
             const offsetX = gameState.tabScroll || 0;
 
-            // 배경
-            ctx.fillStyle = '#0f172a';
+            // 배경 그라디언트
+            const gradient = ctx.createLinearGradient(0, 580, 0, 640);
+            gradient.addColorStop(0, 'rgba(15, 23, 42, 0.95)');
+            gradient.addColorStop(1, 'rgba(10, 14, 26, 0.98)');
+            ctx.fillStyle = gradient;
             ctx.fillRect(0, 580, 360, 60);
+
+            // 상단 테두리
+            ctx.fillStyle = 'rgba(99, 102, 241, 0.3)';
+            ctx.fillRect(0, 580, 360, 1);
 
             tabs.forEach((tab, i) => {
                 const x = i * tabWidth - offsetX;
                 const isActive = gameState.currentTab === tab;
 
-                // 활성 표시
                 if (isActive) {
-                    ctx.fillStyle = '#3b82f6';
+                    // 활성 탭 배경
+                    const tabGrad = ctx.createLinearGradient(x, 580, x, 640);
+                    tabGrad.addColorStop(0, 'rgba(79, 70, 229, 0.4)');
+                    tabGrad.addColorStop(1, 'rgba(79, 70, 229, 0.1)');
+                    ctx.fillStyle = tabGrad;
+                    ctx.fillRect(x, 580, tabWidth, 60);
+
+                    // 상단 표시
+                    ctx.fillStyle = '#4f46e5';
                     ctx.fillRect(x, 580, tabWidth, 3);
                 }
 
                 // 텍스트
-                ctx.fillStyle = isActive ? '#3b82f6' : '#64748b';
-                ctx.font = isActive ? 'bold 10px Noto Sans KR' : '9px Noto Sans KR';
+                ctx.fillStyle = isActive ? '#6366f1' : '#64748b';
+                ctx.font = isActive ? 'bold 11px Noto Sans KR' : '10px Noto Sans KR';
                 ctx.textAlign = 'center';
                 ctx.fillText(tab, x + tabWidth / 2, 615);
 
@@ -1222,12 +1670,192 @@
 
                 ctx.save();
                 ctx.globalAlpha = p.life;
+                ctx.shadowColor = p.color;
+                ctx.shadowBlur = 10;
                 ctx.fillStyle = p.color;
                 ctx.font = `bold ${p.size}px Noto Sans KR`;
                 ctx.textAlign = 'center';
                 ctx.fillText(p.text, p.x, p.y);
                 ctx.restore();
             });
+        }
+
+        function renderPrestige() {
+            const startY = gameState.currentEvent ? 170 : 155;
+
+            ctx.fillStyle = '#f1f5f9';
+            ctx.font = 'bold 22px Noto Sans KR';
+            ctx.textAlign = 'center';
+            ctx.fillText('🌟 환생', 180, startY);
+
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '11px Noto Sans KR';
+            ctx.fillText('모든 것을 초기화하고 영구 보너스를 획득', 180, startY + 25);
+
+            // 전체 콘텐츠 높이 계산
+            const card1Height = 100;  // 현재 환생 정보 카드
+            const card2Height = 190;  // 환생 조건 및 보상 카드
+            const card3Height = 110;  // 안내 카드
+            const spacing = 12;       // 카드 간 간격
+
+            const contentHeight = card1Height + card2Height + card3Height + (spacing * 2);
+            const viewHeight = 640 - (startY + 40) - 80;
+
+            const maxScroll = Math.max(0, contentHeight - viewHeight);
+            gameState.scrollOffset = Math.min(gameState.scrollOffset, maxScroll);
+
+            let y = startY + 40 - gameState.scrollOffset;
+
+            // 현재 환생 정보 카드
+            if (y > startY - card1Height && y < 560) {
+                drawCard(20, y, 320, card1Height, '#1a1f35');
+
+                // 환생 레벨
+                ctx.fillStyle = '#fbbf24';
+                ctx.font = 'bold 22px Noto Sans KR';
+                ctx.textAlign = 'center';
+                ctx.fillText(`현재 환생 Lv.${gameState.prestige}`, 180, y + 38);
+
+                // 전체 배율
+                ctx.fillStyle = '#f1f5f9';
+                ctx.font = 'bold 16px Noto Sans KR';
+                ctx.fillText(`전체 배율: ×${gameState.prestigeBonus.toFixed(2)}`, 180, y + 65);
+
+                // 보너스 설명
+                ctx.fillStyle = '#94a3b8';
+                ctx.font = '11px Noto Sans KR';
+                ctx.fillText(`(환생당 +${(BALANCE.prestigeBonus * 100).toFixed(0)}% 영구 증가)`, 180, y + 85);
+            }
+            y += card1Height + spacing;
+
+            // 환생 조건 및 보상 카드
+            const canPrestige = gameState.totalGoldEarned >= BALANCE.prestigeThreshold;
+            const reward = getPrestigeReward();
+            const diamondReward = getPrestigeDiamondReward();
+            const goldReward = Math.floor(500 * Math.pow(1.2, reward));
+
+            if (y > startY - card2Height && y < 560) {
+                drawCard(20, y, 320, card2Height, canPrestige ? '#1a3a2a' : '#1a1f35');
+
+                // 테두리 효과 (조건 충족 시)
+                if (canPrestige) {
+                    ctx.strokeStyle = '#10b981';
+                    ctx.lineWidth = 2;
+                    drawRoundRect(20, y, 320, card2Height, 14, null, '#10b981');
+                }
+
+                // 제목
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 16px Noto Sans KR';
+                ctx.textAlign = 'center';
+                ctx.fillText('⚡ 환생 조건 및 보상 ⚡', 180, y + 28);
+
+                // 구분선
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(35, y + 42);
+                ctx.lineTo(325, y + 42);
+                ctx.stroke();
+
+                // 조건 섹션
+                ctx.fillStyle = '#94a3b8';
+                ctx.font = '12px Noto Sans KR';
+                ctx.textAlign = 'left';
+                ctx.fillText('📊 현재 진행도', 40, y + 62);
+
+                // 총 획득 골드
+                const progressPercent = Math.min(1, gameState.totalGoldEarned / BALANCE.prestigeThreshold);
+                ctx.fillStyle = canPrestige ? '#10b981' : '#f1f5f9';
+                ctx.font = 'bold 13px Noto Sans KR';
+                ctx.fillText(`${formatGold(gameState.totalGoldEarned)} / ${formatGold(BALANCE.prestigeThreshold)} G`, 40, y + 82);
+
+                // 진행바
+                drawProgressBar(40, y + 90, 260, 8, progressPercent, canPrestige ? '#10b981' : '#4f46e5');
+
+                if (canPrestige && reward > 0) {
+                    // 보상 섹션 제목
+                    ctx.fillStyle = '#fbbf24';
+                    ctx.font = 'bold 13px Noto Sans KR';
+                    ctx.textAlign = 'left';
+                    ctx.fillText('🎁 환생 보상', 40, y + 118);
+
+                    // 보상 아이템들
+                    const rewards = [
+                        { icon: '⭐', text: `환생 레벨 +${reward}`, color: '#fbbf24' },
+                        { icon: '💰', text: `시작 골드 ${formatGold(goldReward)} G`, color: '#10b981' },
+                        { icon: '💎', text: `다이아 +${diamondReward}`, color: '#a855f7' }
+                    ];
+
+                    rewards.forEach((item, i) => {
+                        const itemY = y + 138 + (i * 18);
+
+                        ctx.font = '14px sans-serif';
+                        ctx.fillStyle = item.color;
+                        ctx.fillText(item.icon, 50, itemY);
+
+                        ctx.font = 'bold 12px Noto Sans KR';
+                        ctx.fillText(item.text, 70, itemY);
+                    });
+
+                    // 클릭 박스
+                    clickBoxes.push({ type: 'prestige', x: 20, y, w: 320, h: card2Height });
+
+                } else if (!canPrestige) {
+                    // 조건 미달성 메시지
+                    ctx.fillStyle = '#ef4444';
+                    ctx.font = 'bold 12px Noto Sans KR';
+                    ctx.textAlign = 'center';
+                    const needed = BALANCE.prestigeThreshold - gameState.totalGoldEarned;
+                    ctx.fillText(`⚠️ ${formatGold(needed)} G 더 필요합니다`, 180, y + 125);
+
+                    // 도움말
+                    ctx.fillStyle = '#64748b';
+                    ctx.font = '11px Noto Sans KR';
+                    ctx.fillText('계속 플레이하여 골드를 모아보세요!', 180, y + 148);
+                }
+            }
+            y += card2Height + spacing;
+
+            // 안내 카드
+            if (y > startY - card3Height && y < 560) {
+                drawCard(20, y, 320, card3Height, '#1a1f35');
+
+                ctx.fillStyle = '#64748b';
+                ctx.font = 'bold 11px Noto Sans KR';
+                ctx.textAlign = 'left';
+                ctx.fillText('📌 환생 안내', 40, y + 22);
+
+                ctx.fillStyle = '#94a3b8';
+                ctx.font = '10px Noto Sans KR';
+
+                const tips = [
+                    { icon: '🔄', text: '모든 골드와 자산이 초기화됩니다' },
+                    { icon: '💎', text: '스킬, 유물, 다이아는 그대로 유지됩니다' },
+                    { icon: '✨', text: '환생할수록 더 많은 다이아 보너스!' },
+                    { icon: '🚀', text: '영구 배율로 더 빠르게 성장할 수 있습니다' }
+                ];
+
+                tips.forEach((tip, i) => {
+                    const tipY = y + 44 + (i * 17);
+                    ctx.fillStyle = '#94a3b8';
+                    ctx.font = '12px sans-serif';
+                    ctx.fillText(tip.icon, 40, tipY);
+
+                    ctx.fillStyle = '#cbd5e1';
+                    ctx.font = '10px Noto Sans KR';
+                    ctx.fillText(tip.text, 58, tipY);
+                });
+            }
+
+            if (contentHeight > viewHeight) {
+                const scrollBarHeight = Math.max(30, (viewHeight / contentHeight) * viewHeight);
+                const scrollBarY = startY + 40 + (gameState.scrollOffset / maxScroll) * (viewHeight - scrollBarHeight);
+
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+                drawRoundRect(350, scrollBarY, 4, scrollBarHeight, 2, 'rgba(255, 255, 255, 0.2)');
+                // ctx.fill(); 제거
+            }
         }
 
         function spawnParticle(x, y, value, isCrit) {
@@ -1237,21 +1865,33 @@
                 vy: -8 - Math.random() * 4,
                 life: 1.0,
                 text: '+' + formatGold(value),
-                size: isCrit ? 20 : 14,
+                size: isCrit ? 22 : 16,
                 color: isCrit ? '#ef4444' : '#10b981'
             });
         }
 
+        function spawnDiamondParticle(x, y, value) {
+            particles.push({
+                x, y,
+                vx: (Math.random() - 0.5) * 4,
+                vy: -6 - Math.random() * 3,
+                life: 1.2,
+                text: '+' + value + ' 💎',
+                size: 18,
+                color: '#a855f7'
+            });
+        }
+
         function spawnCritEffect(x, y) {
-            for (let i = 0; i < 5; i++) {
+            for (let i = 0; i < 8; i++) {
                 particles.push({
-                    x: x + (Math.random() - 0.5) * 40,
-                    y: y + (Math.random() - 0.5) * 40,
-                    vx: (Math.random() - 0.5) * 8,
-                    vy: (Math.random() - 0.5) * 8,
+                    x: x + (Math.random() - 0.5) * 50,
+                    y: y + (Math.random() - 0.5) * 50,
+                    vx: (Math.random() - 0.5) * 10,
+                    vy: (Math.random() - 0.5) * 10,
                     life: 0.8,
                     text: '✨',
-                    size: 16,
+                    size: 18,
                     color: '#fbbf24'
                 });
             }
@@ -1271,24 +1911,24 @@
             }
 
             const alpha = Math.min(1, gameState.notification.timer / 60);
-            const y = 200 - (1 - alpha) * 20;
+            const y = 220 - (1 - alpha) * 30;
 
             ctx.save();
             ctx.globalAlpha = alpha;
 
-            drawCard(60, y, 240, 50, '#1e293b');
-            drawGlow(60, y, 240, 50, 12, '#fbbf24', 0.5);
+            drawCard(50, y, 260, 60, '#1a1f35');
+            drawGlow(50, y, 260, 60, 14, '#fbbf24', 0.6);
 
             ctx.fillStyle = '#fbbf24';
-            ctx.font = 'bold 14px Noto Sans KR';
+            ctx.font = 'bold 15px Noto Sans KR';
             ctx.textAlign = 'center';
-            ctx.fillText(gameState.notification.text, 180, y + 30);
+            ctx.fillText(gameState.notification.text, 180, y + 37);
 
             ctx.restore();
         }
 
         // ═══════════════════════════════════════════════════════════
-        // 🎮 입력 처리
+        // 입력 처리
         // ═══════════════════════════════════════════════════════════
 
         inputLayer.addEventListener('click', (e) => {
@@ -1305,21 +1945,25 @@
                     if (box.type === 'tab') {
                         gameState.currentTab = box.tab;
                         gameState.scrollOffset = 0;
-
                         playSound('click');
                     } else if (box.type === 'begging') {
                         handleClick(x, y);
                     } else if (box.type === 'upgrade') {
-                        if (buyUpgrade(box.subtype, box.count)) {
-                            // 성공
-                        }
+                        buyUpgrade(box.subtype, box.count);
                     } else if (box.type === 'skill') {
                         upgradeSkill(box.skill);
                     } else if (box.type === 'asset') {
                         buyAsset(box.category, box.index);
                     } else if (box.type === 'prestige') {
-                        if (confirm('정말 환생하시겠습니까? 모든 골드와 자산이 초기화됩니다.')) {
+                        if (confirm('정말 환생하시겠습니까?\n\n모든 골드와 자산이 초기화되지만,\n영구 보너스와 시작 골드를 받습니다.')) {
                             prestige();
+                        }
+                    } else if (box.type === 'shop') {
+                        buyShopItem(box.item);
+                    } else if (box.type === 'relic_pull') {
+                        const relic = pullRelic();
+                        if (relic) {
+                            console.log('획득:', relic.name);
                         }
                     }
 
@@ -1332,30 +1976,21 @@
             }
         });
 
-        // 스크롤 
         inputLayer.addEventListener('wheel', (e) => {
             const rect = canvas.getBoundingClientRect();
             const y = (e.clientY - rect.top) * (640 / rect.height);
 
-            // 탭 영역 (하단 580~640)
             if (y >= 580) {
                 gameState.tabScroll = (gameState.tabScroll || 0) + e.deltaY * 0.5;
-
-                const maxScroll = (70 * 9) - 360;
+                const maxScroll = (65 * 11) - 360;
                 gameState.tabScroll = Math.max(0, Math.min(gameState.tabScroll, maxScroll));
-            }
-
-            // 컨텐츠 영역 (상점 / 스킬 등)
-            else if (Assets[gameState.currentTab] || gameState.currentTab === '스킬') {
+            } else if (Assets[gameState.currentTab] || gameState.currentTab === '스킬' || gameState.currentTab === '유물' || gameState.currentTab === '상점' || gameState.currentTab === '환생') { // 🔥 상점 추가
                 gameState.scrollOffset += e.deltaY * 0.5;
-
-                // 최대 스크롤 제한
-                const maxScroll = 1000; // 임시 
+                const maxScroll = 2000;
                 gameState.scrollOffset = Math.max(0, Math.min(gameState.scrollOffset, maxScroll));
             }
         });
 
-        // 터치
         let isDragging = false;
         let startY = 0;
         let startX = 0;
@@ -1363,7 +1998,6 @@
         let lastX = 0;
         let velocityY = 0;
         let velocityX = 0;
-        let isTabArea = false;
         let isHorizontal = null;
 
         inputLayer.addEventListener('touchstart', (e) => {
@@ -1378,7 +2012,6 @@
             startX = lastX = x;
             velocityY = 0;
             velocityX = 0;
-
             isHorizontal = null;
         });
 
@@ -1387,7 +2020,6 @@
 
             const rect = canvas.getBoundingClientRect();
             const touch = e.touches[0];
-
             const x = (touch.clientX - rect.left) * (360 / rect.width);
             const y = (touch.clientY - rect.top) * (640 / rect.height);
 
@@ -1401,52 +2033,38 @@
                 isHorizontal = Math.abs(deltaX) > Math.abs(deltaY);
             }
 
-            // 가로 스크롤 (탭)
             if (isHorizontal) {
                 gameState.tabScroll += deltaX;
-
-                const maxScroll = (70 * 9) - 360;
+                const maxScroll = (65 * 11) - 360;
                 gameState.tabScroll = Math.max(0, Math.min(gameState.tabScroll, maxScroll));
-            }
-
-            // 세로 스크롤 (컨텐츠)
-            else if (Assets[gameState.currentTab] || gameState.currentTab === '스킬') {
+            } else if (Assets[gameState.currentTab] || gameState.currentTab === '스킬' || gameState.currentTab === '유물' || gameState.currentTab === '상점' || gameState.currentTab === '환생') { // 🔥 상점 추가
                 gameState.scrollOffset += deltaY;
-
-                const maxScroll = 1000; // 나중에 동적 계산 가능
+                const maxScroll = 2000;
                 gameState.scrollOffset = Math.max(0, Math.min(gameState.scrollOffset, maxScroll));
             }
 
             lastY = y;
             lastX = x;
-
-            e.preventDefault(); // 중요 (모바일 스크롤 막기)
+            e.preventDefault();
         }, { passive: false });
 
         inputLayer.addEventListener('touchend', () => {
             isDragging = false;
 
-            const friction = 0.95;
+            const friction = 0.93;
 
             function inertia() {
                 if (Math.abs(velocityY) < 0.1 && Math.abs(velocityX) < 0.1) return;
 
-                // 가로 관성
                 if (isHorizontal) {
                     gameState.tabScroll += velocityX;
-
-                    const maxScroll = (70 * 9) - 360;
+                    const maxScroll = (65 * 11) - 360;
                     gameState.tabScroll = Math.max(0, Math.min(gameState.tabScroll, maxScroll));
-
                     velocityX *= friction;
-                }
-                // 세로 관성
-                else {
+                } else {
                     gameState.scrollOffset += velocityY;
-
-                    const maxScroll = 1000;
+                    const maxScroll = 2000;
                     gameState.scrollOffset = Math.max(0, Math.min(gameState.scrollOffset, maxScroll));
-
                     velocityY *= friction;
                 }
 
@@ -1455,12 +2073,12 @@
 
             inertia();
         });
+
         // ═══════════════════════════════════════════════════════════
-        // 🎵 사운드 (간단한 피드백)
+        // 사운드
         // ═══════════════════════════════════════════════════════════
 
         function playSound(type) {
-            // Web Audio API로 간단한 사운드 생성
             try {
                 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 const oscillator = audioCtx.createOscillator();
@@ -1485,18 +2103,12 @@
                     oscillator.start();
                     oscillator.stop(audioCtx.currentTime + 0.15);
                 }
-            } catch (e) {
-                // 사운드 실패는 무시
-            }
+            } catch (e) { }
         }
 
-        // ═══════════════════════════════════════════════════════════
-        // 🎵 코인 사운드
-        // ═══════════════════════════════════════════════════════════
         function playCoinSound(isCrit = false) {
             try {
                 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
                 const oscillator = audioCtx.createOscillator();
                 const gainNode = audioCtx.createGain();
 
@@ -1504,7 +2116,6 @@
                 gainNode.connect(audioCtx.destination);
 
                 if (isCrit) {
-                    // ⭐ 크리티컬: 화려한 소리
                     oscillator.type = 'triangle';
                     oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
                     oscillator.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.1);
@@ -1512,7 +2123,6 @@
                     oscillator.start();
                     oscillator.stop(audioCtx.currentTime + 0.15);
                 } else {
-                    // 💰 일반 코인
                     oscillator.type = 'square';
                     oscillator.frequency.value = 600;
                     gainNode.gain.value = 0.1;
@@ -1523,48 +2133,43 @@
         }
 
         // ═══════════════════════════════════════════════════════════
-        // 🔄 게임 루프
+        // 게임 루프
         // ═══════════════════════════════════════════════════════════
+
+        function gameLoop() {
+            update(); render(); requestAnimationFrame(gameLoop);
+        }
 
         function update() {
             frameCount++;
-
-            // 자동 수익 (1초마다)
-            if (frameCount % AUTO_TICK_RATE === 0) {
-                processAutoIncome();
+            if (frameCount % AUTO_TICK_RATE === 0) processAutoIncome();
+            if (gameState.currentEvent) {
+                gameState.eventTimer--;
+                if (gameState.eventTimer <= 0) gameState.currentEvent = null;
+            } else if (frameCount % 1800 === 0 && Math.random() < 0.2) {
+                const event = Events[Math.floor(Math.random() * Events.length)];
+                gameState.currentEvent = { ...event, timer: event.duration };
+                showNotification(event.name);
             }
-
-            // 이벤트 업데이트
-            updateEvent();
-
-            // 자동 저장 (5초마다)
-            if (frameCount % (FPS * 5) === 0) {
-                save();
-            }
-        }
-
-        function gameLoop() {
-            update();
-            render();
-            requestAnimationFrame(gameLoop);
+            activePotions = activePotions.filter(p => { p.timer--; return p.timer > 0; });
+            if (frameCount % (FPS * 5) === 0) save();
         }
 
         // ═══════════════════════════════════════════════════════════
-        // 🚀 초기화
+        // 초기화
         // ═══════════════════════════════════════════════════════════
 
         function init() {
             load();
-
-            // 로딩 화면 제거
-            setTimeout(() => {
-                loadingScreen.classList.add('hidden');
-            }, 500);
-
+            setTimeout(() => loadingScreen.classList.add('hidden'), 500);
             gameLoop();
         }
-
         init();
+
+        // 자동 터치 (구매 시)
+        setInterval(() => {
+            if (autoClicker.enabled) handleClick(180, 300);
+        }, 150);
     </script>
 </body>
 
